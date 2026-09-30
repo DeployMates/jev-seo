@@ -11,6 +11,7 @@ import { CrawlTable, type CrawlMeta } from "./CrawlTable"
 import { DoThisNow } from "./DoThisNow"
 import { PagesToBuild } from "./PagesToBuild"
 import { RivalsPanel } from "./RivalsPanel"
+import { RunDiff } from "./RunDiff"
 import { OpportunityBoard } from "./OpportunityBoard"
 import { runResearch as runResearchStream } from "./api"
 import type { ServerConfig } from "./api"
@@ -33,6 +34,7 @@ import type {
   PatternCount,
   SubjectRow,
 } from "./types"
+import { parseRivals, rivalKey, RIVAL_CAP_FALLBACK, type RivalSlot } from "./rivals"
 import type { ResearchPayload } from "./researchTypes"
 
 type View = "pages" | "keywords" | "competitors"
@@ -244,13 +246,14 @@ export default function App() {
     competitors: "",
     maxPages: 15,
     maxKeywords: 24,
+    maxCompetitors: RIVAL_CAP_FALLBACK,
     concurrency: 8,
     runJev: true,
   })
   const [running, setRunning] = useState(false)
   const [pages, setPages] = useState<PageJudgement[]>([])
   const [keywords, setKeywords] = useState<KeywordJudgement[]>([])
-  const [competitors, setCompetitors] = useState<CompetitorResult[]>([])
+  const [rivalSlots, setRivalSlots] = useState<RivalSlot[]>([])
   const [pending, setPending] = useState<Array<{ label: string; url: string; kind: View }>>([])
   const [selected, setSelected] = useState<string | null>(null)
   const [report, setReport] = useState<AuditReport | null>(null)
@@ -550,7 +553,7 @@ export default function App() {
     setError(null)
     setPages([])
     setKeywords([])
-    setCompetitors([])
+    setRivalSlots([])
     setPending([])
     setSelected(null)
     setReport(null)
@@ -680,8 +683,35 @@ export default function App() {
                 costUsd: Number((prev.costUsd + event.keyword.costUsd).toFixed(6)),
               }))
               break
-            case "competitor-done":
-              setCompetitors((prev) => [...prev.filter((c) => c.url !== event.competitor.url), event.competitor])
+            case "competitor-start":
+              setRivalSlots((prev) => {
+                const key = rivalKey(event.url)
+                if (prev.some((slot) => slot.key === key)) return prev
+                return [
+                  ...prev,
+                  { key, requested: event.url, index: event.index, result: null },
+                ]
+              })
+              break
+            case "competitor-done": {
+              const key = rivalKey(event.competitor.url)
+              setRivalSlots((prev) => {
+                const at = prev.findIndex((slot) => slot.key === key)
+                if (at === -1) {
+                  return [
+                    ...prev,
+                    {
+                      key,
+                      requested: event.competitor.url,
+                      index: prev.length,
+                      result: event.competitor,
+                    },
+                  ]
+                }
+                return prev.map((slot, i) =>
+                  i === at ? { ...slot, result: event.competitor } : slot,
+                )
+              })
               if (event.competitor.reachable) {
                 setLive((prev) => ({
                   ...prev,
@@ -691,6 +721,7 @@ export default function App() {
                 }))
               }
               break
+            }
             case "retry":
               push(`↻ retry ${event.attempt} · ${event.url}`)
               break
@@ -788,7 +819,6 @@ export default function App() {
     : 0
   const needsHumanCount =
     pages.filter((p) => p.needsHuman).length + keywords.filter((k) => k.needsHuman).length
-  const rivalCount = form.competitors.split(/[\n,]/).filter((v) => v.trim()).length
 
   const pageFindings = report?.findings ?? []
   const topKeywords = report?.keywords ?? []
@@ -842,8 +872,34 @@ export default function App() {
 
   const notDecidedCount = notDecided.length
 
-  const rivalsNow = competitors.length > 0 ? competitors : (report?.competitors ?? [])
+  /**
+   * Slots carry the dequeue order, so panel 04 renders them as they arrived.
+   * The report's flat `competitors[]` is the fallback for a report that
+   * arrived without live slots behind it; it has no pending state to lose.
+   */
+  const slots = useMemo(() => {
+    if (rivalSlots.length > 0) return [...rivalSlots].sort((a, b) => a.index - b.index)
+    return (report?.competitors ?? []).map((result, index) => ({
+      key: rivalKey(result.url),
+      requested: result.url,
+      index,
+      result,
+    }))
+  }, [rivalSlots, report?.competitors])
+
+  const rivalsNow = useMemo(
+    () => slots.flatMap((slot) => (slot.result ? [slot.result] : [])),
+    [slots],
+  )
   const rivalsReachable = rivalsNow.filter((c) => c.reachable).length
+  const rivalsJudged = rivalsNow.length
+  const rivalsInFlight = slots.length - rivalsJudged
+  const rivalsEntered = parseRivals(form.competitors).length
+  const rivalCap = Math.max(1, form.maxCompetitors)
+  const rivalsJudgedThisRun = Math.min(rivalsEntered, rivalCap)
+  const rivalsPastCap = Math.max(0, rivalsEntered - rivalCap)
+
+  const delta = report?.delta ?? null
   const proposals = presearchPayload?.competitors ?? []
   const presearchRan = report?.presearch?.ran ?? presearchPayload !== null
   const presearchDegraded = report?.presearch?.degraded ?? sessionSummary?.degraded ?? false
@@ -1002,7 +1058,39 @@ export default function App() {
             onChange={(e) => setForm({ ...form, competitors: e.target.value })}
             style={{ minHeight: 54 }}
           />
-          <span className="hint">Judged on the same rubric, so the scorecards compare.</span>
+          <div className="capline">
+            <span
+              className="capnum"
+              title="Rivals this run judges, out of the rivals you entered. Anything past the cap is never crawled."
+            >
+              {rivalsJudgedThisRun} of {rivalsEntered} rivals entered are judged this run
+            </span>
+            {rivalsPastCap > 0 && (
+              <span className="capwarn" title="These sit past the cap and are never crawled.">
+                {rivalsPastCap} past the cap, never crawled
+              </span>
+            )}
+          </div>
+          <div className="capctl">
+            <label htmlFor="rivalcap">Rival cap</label>
+            <input
+              id="rivalcap"
+              type="number"
+              min={1}
+              max={20}
+              value={form.maxCompetitors}
+              onChange={(e) =>
+                setForm({
+                  ...form,
+                  maxCompetitors: Math.max(1, Math.min(20, Number(e.target.value) || 1)),
+                })
+              }
+            />
+            <span className="hint">
+              Judged on the same rubric, so the scorecards compare. This run crawls the first {rivalCap}{" "}
+              {rivalCap === 1 ? "rival" : "rivals"} you list.
+            </span>
+          </div>
         </div>
 
         <div className="field">
@@ -1175,6 +1263,9 @@ export default function App() {
               crawled={crawlRows.length}
               pagesJudged={judgedPageCount}
               held={notDecidedCount}
+              site={report?.root ?? form.url}
+              generatedAt={report?.generatedAt ?? new Date().toISOString()}
+              model={report?.model ?? config?.model ?? ""}
             />
           </div>
         </section>
@@ -1210,8 +1301,12 @@ export default function App() {
             <span className="idx">04</span>
             <h2 id="rivals-h">rivals</h2>
             <span className="what">Side by side on the same rubric, judged from pages crawled off each rival&rsquo;s own site.</span>
-            <span className="count">
-              {rivalsReachable} of {rivalCount} rivals reachable
+            <span
+              className="count"
+              title="Rivals that returned a usable crawl, out of the rivals this run judges."
+            >
+              {rivalsReachable} of {rivalsJudgedThisRun} rivals reachable
+              {rivalsInFlight > 0 ? ` · ${rivalsInFlight} still crawling` : ""}
             </span>
           </div>
           <div className="halfbody">
@@ -1229,11 +1324,12 @@ export default function App() {
                   : "not run",
               }}
               rivals={rivalsNow}
+              slots={slots}
               proposals={proposals}
               metrics={presearchPayload?.metrics ?? []}
               running={running && !report}
               hasRun={hasRun}
-              requested={rivalCount}
+              requested={rivalsJudgedThisRun}
               presearchRan={presearchRan}
               presearchDegraded={presearchDegraded}
               presearchReason={presearchReason}
@@ -1301,6 +1397,26 @@ export default function App() {
           </div>
         </section>
 
+        <section className="half advice" aria-labelledby="diff-h" data-tour="run-diff">
+          <div className="halfhead">
+            <span className="idx">06</span>
+            <h2 id="diff-h">since last run</h2>
+            <span className="what">
+              What moved between this run and the one before it on the same site.
+            </span>
+            <span className="count">
+              {delta ? `${delta.fixed.length} fixed · ${delta.regressed.length} regressed` : "no comparison yet"}
+            </span>
+          </div>
+          <div className="halfbody">
+            <Explain>
+              <b>What this gives you:</b> what you closed, what came back, and what you have not
+              touched.
+            </Explain>
+            <RunDiff delta={delta} running={running && !report} />
+          </div>
+        </section>
+
         <div data-tour="evidence">
           <details className="drawer">
             <summary>
@@ -1311,7 +1427,7 @@ export default function App() {
                 here — grouped by entity, not used to navigate between them.
               </span>
               <span className="dcount">
-                {pages.length} pages · {keywords.length} subjects · {competitors.length} rivals
+                {pages.length} pages · {keywords.length} subjects · {rivalsNow.length} rivals
               </span>
             </summary>
             <div className="dbody">
@@ -1319,12 +1435,12 @@ export default function App() {
                 <OpportunityBoard
                   keywords={report ? report.keywords : keywords}
                   gaps={report ? report.gaps : liveGaps}
-                  competitors={competitors.length > 0 ? competitors : (report?.competitors ?? [])}
+                  competitors={rivalsNow}
                   judgedTotal={report ? report.totals.keywordsJudged : keywords.length}
                   judgedAll={keywords}
                   keywordsEnabled={form.maxKeywords > 0}
                   hasRun={hasRun}
-                  rivals={competitors.length > 0 ? competitors : (report?.competitors ?? [])}
+                  rivals={rivalsNow}
                   pages={pages.length > 0 ? pages : (report?.pages ?? [])}
                   running={running && !report}
                 />
@@ -1348,8 +1464,8 @@ export default function App() {
                   {v}
                   {v === "pages" && pages.length > 0 ? <span className="c">{pages.length}</span> : ""}
                   {v === "keywords" && keywords.length > 0 ? <span className="c">{keywords.length}</span> : ""}
-                  {v === "competitors" && competitors.length > 0 ? (
-                    <span className="c">{competitors.length}</span>
+                  {v === "competitors" && rivalsNow.length > 0 ? (
+                    <span className="c">{rivalsNow.length}</span>
                   ) : ""}
                 </button>
               ))}
@@ -1365,7 +1481,7 @@ export default function App() {
                       : "every rival judged"}
                   <span className="tag">
                     {view === "competitors"
-                      ? `${competitors.length} / ${rivalCount}`
+                      ? `${rivalsJudged} / ${rivalsEntered}`
                       : `${live.pagesJudged + live.keywordsJudged}${
                           report && report.keywordPool.length > 0
                             ? ` / ${report.totals.pagesJudged + report.keywordPool.length}`
@@ -1498,7 +1614,7 @@ export default function App() {
                       <div className="s">{report ? report.score : "–"}</div>
                       <div className="copy" />
                     </div>
-                    {competitors.map((c) => (
+                    {rivalsNow.map((c) => (
                       <div className="comp" key={c.url}>
                         <div className="g">{c.reachable ? c.grade : "!"}</div>
                         <div className="d">
@@ -1515,7 +1631,7 @@ export default function App() {
                         <div className="copy">{c.worthCopying >= 0.5 ? "WORTH COPYING" : ""}</div>
                       </div>
                     ))}
-                    {competitors.length === 0 && <div className="empty">No rivals given.</div>}
+                    {rivalsNow.length === 0 && <div className="empty">No rivals given.</div>}
                   </div>
                 )}
               </div>
@@ -1739,7 +1855,7 @@ export default function App() {
                           </div>
                         </div>
                       </div>
-                      {competitors.length > 0 && (
+                      {rivalsNow.length > 0 && (
                         <div className="note">
                           Rivals judged on the same rubric. The gap is the market story, not the model&rsquo;s opinion.
                         </div>

@@ -66,6 +66,24 @@ input, textarea, select { font: inherit; }
 .field.inline label { text-transform: none; letter-spacing: 0; font-size: 12.5px; color: var(--ink); }
 .actions { display: flex; align-items: flex-end; gap: 10px; }
 
+.capline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.capline .capnum {
+  font: 11px/1 var(--mono); color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.capline .capwarn {
+  font: 10px/1 var(--mono); color: var(--warn); text-transform: uppercase;
+  letter-spacing: 0.06em; border: 1px solid color-mix(in srgb, var(--warn) 35%, var(--line));
+  border-radius: 999px; padding: 3px 8px;
+}
+.capctl { display: flex; align-items: center; gap: 8px; }
+.capctl label {
+  text-transform: none; letter-spacing: 0; font-size: 12.5px; color: var(--ink);
+  white-space: nowrap;
+}
+.capctl input[type="number"] { width: 68px; flex: 0 0 auto; }
+.capctl .hint { font-size: 11px; color: var(--dim); }
+
 button.primary {
   background: var(--ink); color: var(--paper); border: 0; border-radius: var(--radius);
   padding: 9px 18px; font-weight: 600;
@@ -219,6 +237,9 @@ button.ghost {
 .comp .s { font: 700 17px/1 var(--mono); text-align: right; }
 .comp .copy { font: 10px/1 var(--mono); text-align: right; color: var(--hot); }
 .comp.me { background: #fffdf5; }
+.comp.pending { background: var(--bg); }
+.comp.pending .h, .comp.pending .g, .comp.pending .s { color: var(--dim); font-weight: 500; }
+.comp.pending .m { color: var(--dim); }
 .comp .mebadge {
   font: 9.5px/1 var(--mono); background: var(--ink); color: var(--paper);
   padding: 3px 5px; border-radius: 2px; margin-left: 6px; vertical-align: middle;

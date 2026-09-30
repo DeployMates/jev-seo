@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react"
 import type { Band, DecisionRow } from "./types"
 import { FALSIFIER_LABEL, falsifierIsGeneric, falsifierSentence } from "./decisionCopy"
+import { downloadDecisionsCsv } from "./decisionCsv"
 import "./decisions.css"
 
 const BAND_WORD: Record<Band, string> = {
@@ -153,6 +154,9 @@ export interface DoThisNowProps {
   /** Pages actually judged, which separates "gate refused" from "pass broke". */
   pagesJudged: number
   held: number
+  site: string
+  generatedAt: string
+  model: string
 }
 
 export function DoThisNow({
@@ -162,6 +166,9 @@ export function DoThisNow({
   crawled,
   pagesJudged,
   held,
+  site,
+  generatedAt,
+  model,
 }: DoThisNowProps) {
   const rows = useMemo(() => [...decisions].sort((a, b) => b.priority - a.priority), [decisions])
 
@@ -217,9 +224,23 @@ export function DoThisNow({
           />
         ))}
       </div>
-      <p className="dnote">
-        {rows.length} of {crawled || rows.length} crawled pages cleared the gate
-        {held > 0 ? ` · ${held} held back in 05` : ""}
+      <div className="dfoot-row">
+        <p className="dnote">
+          {rows.length} of {crawled || rows.length} crawled pages cleared the gate
+          {held > 0 ? ` · ${held} held back in 05` : ""}
+        </p>
+        <button
+          type="button"
+          className="dexport"
+          title={`Download these ${rows.length} decision rows as a CSV. Counts and probabilities only, with the run's own judge and timestamp in the file.`}
+          onClick={() => downloadDecisionsCsv(rows, { site, generatedAt, model })}
+        >
+          export {rows.length} rows as csv
+        </button>
+      </div>
+      <p className="dnote faint">
+        The file carries each row&rsquo;s counted facts and the judge&rsquo;s own probabilities, with
+        the run named in it.
       </p>
     </div>
   )

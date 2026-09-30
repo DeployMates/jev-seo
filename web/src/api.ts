@@ -1,4 +1,5 @@
 import type { AuditEvent, AuditForm, AuditReport, AuditRequestBody } from "./types"
+import { parseRivals } from "./rivals"
 import type {
   AutofillRun,
   CompetitorProposal,
@@ -18,7 +19,7 @@ export interface ServerConfig {
   agentModel: string
   gscConfigured: boolean
   model: string
-  defaults: { maxPages: number; concurrency: number }
+  defaults: { maxPages: number; concurrency: number; maxCompetitors?: number }
 }
 
 export async function fetchConfig(): Promise<ServerConfig> {
@@ -57,10 +58,7 @@ export async function runAudit(
   const { competitors, ...rest } = form
   const body: AuditRequestBody = {
     ...rest,
-    competitors: competitors
-      .split(/[\n,]/)
-      .map((value) => value.trim())
-      .filter(Boolean),
+    competitors: parseRivals(competitors),
     ...(extras ?? {}),
   }
 

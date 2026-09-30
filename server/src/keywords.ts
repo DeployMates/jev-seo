@@ -79,6 +79,14 @@ const COMMERCIAL_MARKERS = new Set([
   "near", "review", "reviews", "discount", "plan", "plans", "pricing",
 ])
 
+/**
+ * `mined` = the n-gram pool from our own pages. `presearch_seed` = a term the
+ * research pass typed into a real search and got results back for. Same shape
+ * because both are judged in the same call, but not the same evidence, so the
+ * pipeline branches on this rather than guessing which one it is holding.
+ */
+export type CandidateOrigin = "mined" | "presearch_seed"
+
 export interface KeywordCandidate {
   term: string
   words: number
@@ -90,6 +98,16 @@ export interface KeywordCandidate {
   inHeadings: number
   /** Appears in a page title. */
   inTitle: number
+  /**
+   * `presearch_seed` wins when a term arrived as a seed and was also found on
+   * our own pages: the seed is the stronger evidence and `subjects.ts` keys off
+   * exactly this. A seed with zero on-page counts is a genuine gap.
+   */
+  origin: CandidateOrigin
+  /** The research pass's intent label, verbatim. Never re-derived here. */
+  seedIntent?: string
+  /** The tool the research pass cited for this term, verbatim. */
+  seedEvidenceTool?: string
   /** The phrase is phrased as a question. */
   questionForm: boolean
   /** The phrase implies a choice between things. */
@@ -165,6 +183,53 @@ function ngrams(tokens: string[], maxWords: number): string[] {
 const CHROME_LINK_DENSITY = 0.25
 
 /**
+ * Per-word corpus statistics, shared by the miner and the seed measurer so a
+ * term gets the same `namedEntityForm` verdict whichever pool it entered by.
+ * `titleVocab` is the set of words named at the top of a page; `docFreq` is how
+ * many pages contain each word, so a word named on one page is a proper name
+ * and a word on every page is part of the subject.
+ */
+function corpusStats(pages: PageEvidence[]): {
+  titleVocab: Set<string>
+  docFreq: Map<string, number>
+  isProperName: (word: string) => boolean
+} {
+  const titleVocab = new Set<string>()
+  const docFreq = new Map<string, number>()
+
+  for (const page of pages) {
+    for (const token of tokenise(`${page.title} ${page.h1}`)) titleVocab.add(token)
+    for (const token of tokenise(page.text)) {
+      docFreq.set(token, (docFreq.get(token) ?? 0) + 1)
+    }
+  }
+
+  // A product named on four pages is still a name; the ceiling is only there to
+  // exclude the shared subject words that make up the head of every term.
+  const isProperName = (word: string): boolean => {
+    if (word.length < 3) return false
+    if (/\d/.test(word)) return true
+    if (!titleVocab.has(word)) return false
+    return (docFreq.get(word) ?? 0) <= Math.max(3, pages.length * 0.25)
+  }
+
+  return { titleVocab, docFreq, isProperName }
+}
+
+/** Wording flags, derived from the phrase alone. Observable with no corpus. */
+function wordingFlags(term: string): {
+  questionForm: boolean
+  comparisonForm: boolean
+  commercialForm: boolean
+} {
+  return {
+    questionForm: hasMarker(term, QUERY_MARKERS),
+    comparisonForm: hasMarker(term, COMPARISON_MARKERS),
+    commercialForm: hasMarker(term, COMMERCIAL_MARKERS),
+  }
+}
+
+/**
  * Build the candidate pool from every page's title, headings and body.
  *
  * A term survives if it appears in a heading, or on more than one page, or
@@ -189,17 +254,6 @@ export function extractKeywords(pages: PageEvidence[], limit = 40): KeywordCandi
   /** Pages carrying the term in prose, excluding nav-dense ones. */
   const proseHits = new Map<string, number>()
 
-  /**
-   * Per-word corpus statistics, used to tell a proper name from a common
-   * subject word without a fixed vocabulary. `titleVocab` is the set of words
-   * that appear in some page's title or H1 — a brand, a product or a place is
-   * named at the top of a page, a common noun is not. `docFreq` is how many
-   * pages contain each word, so a word that only ever appears in titles on one
-   * page is a name, while a word on every page is part of the subject.
-   */
-  const titleVocab = new Set<string>()
-  const docFreq = new Map<string, number>()
-
   const bump = (term: string) => freq.set(term, (freq.get(term) ?? 0) + 1)
   const addPage = (term: string, path: string) => {
     const set = byPage.get(term) ?? new Set<string>()
@@ -207,26 +261,7 @@ export function extractKeywords(pages: PageEvidence[], limit = 40): KeywordCandi
     byPage.set(term, set)
   }
 
-  for (const page of pages) {
-    for (const token of tokenise(`${page.title} ${page.h1}`)) titleVocab.add(token)
-    for (const token of tokenise(page.text)) {
-      docFreq.set(token, (docFreq.get(token) ?? 0) + 1)
-    }
-  }
-
-  /**
-   * A word is treated as a proper name when it is named at the top of a page
-   * and is not common vocabulary across the crawl. The document-frequency
-   * ceiling is deliberately loose: a product named on four pages is still a
-   * name, and the point is only to exclude the shared subject words that make
-   * up the head of every term.
-   */
-  const isProperName = (word: string): boolean => {
-    if (word.length < 3) return false
-    if (/\d/.test(word)) return true
-    if (!titleVocab.has(word)) return false
-    return (docFreq.get(word) ?? 0) <= Math.max(3, pages.length * 0.25)
-  }
+  const { isProperName } = corpusStats(pages)
 
   for (const page of pages) {
     const path = page.path
@@ -279,9 +314,7 @@ export function extractKeywords(pages: PageEvidence[], limit = 40): KeywordCandi
     const pages_ = [...(byPage.get(term) ?? [])]
 
     const words = term.split(" ")
-    const questionForm = hasMarker(term, QUERY_MARKERS)
-    const comparisonForm = hasMarker(term, COMPARISON_MARKERS)
-    const commercialForm = hasMarker(term, COMMERCIAL_MARKERS)
+    const { questionForm, comparisonForm, commercialForm } = wordingFlags(term)
     const queryShaped = questionForm || comparisonForm || commercialForm
     const namedEntityForm = words.some(isProperName)
     // A head term is one where every word is shared vocabulary: no proper name
@@ -304,16 +337,11 @@ export function extractKeywords(pages: PageEvidence[], limit = 40): KeywordCandi
       continue
     }
 
-    const weight =
-      count +
-      pages_.length * 2 +
-      inHeadings * 4 +
-      inTitle * 5 +
-      (questionForm ? 3 : 0) +
-      (comparisonForm ? 3 : 0) +
-      (commercialForm ? 2 : 0) +
-      (namedEntityForm ? 2 : 0) +
-      words.length * 1.5
+    const weight = weightOf(
+      { frequency: count, pageCount: pages_.length, inHeadings, inTitle },
+      { questionForm, comparisonForm, commercialForm, namedEntityForm },
+      words.length,
+    )
 
     candidates.push({
       term,
@@ -322,6 +350,7 @@ export function extractKeywords(pages: PageEvidence[], limit = 40): KeywordCandi
       frequency: count,
       inHeadings,
       inTitle,
+      origin: "mined",
       questionForm,
       comparisonForm,
       commercialForm,
@@ -351,4 +380,250 @@ export function seedClusters(candidates: KeywordCandidate[]): Map<string, string
     groups.set(key, [...(groups.get(key) ?? []), candidate.term])
   }
   return groups
+}
+
+/* -------------------------------------------------------------------------- */
+/* the second source: terms somebody else typed                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A term the research pass typed into a real search and got results back for.
+ *
+ * Structurally compatible with `AuditKeywordSeed` in `audit.ts`; declared
+ * structurally here so `keywords.ts` keeps zero imports and stays testable
+ * without the harness.
+ */
+export interface PresearchSeed {
+  term: string
+  intent?: string
+  evidence_tool?: string
+}
+
+/**
+ * Seeds admitted into the pool per run. A presearch pass returns 16–22, so this
+ * is a ceiling against a hostile or runaway input, not a real constraint. It is
+ * deliberately NOT `maxKeywords`: that knob is named for the mined pool and
+ * reading it as a cap on externally supplied evidence would let a client
+ * silently decide how much outside evidence the gap pass gets to see.
+ */
+export const MAX_SEED_CANDIDATES = 24
+
+/**
+ * Order weight for a seed we never saw on our own pages.
+ *
+ * Small on purpose. `weight` orders the candidate pool and nothing else — no
+ * threshold reads it — so an unmeasured term must not float to the top of a
+ * list a customer acts on. It is non-zero so the row is visible in the evidence
+ * drawer, which is where an unexplained ordering should show up.
+ */
+const UNMEASURED_SEED_WEIGHT = 1
+
+function weightOf(
+  counts: { frequency: number; pageCount: number; inHeadings: number; inTitle: number },
+  flags: {
+    questionForm: boolean
+    comparisonForm: boolean
+    commercialForm: boolean
+    namedEntityForm: boolean
+  },
+  words: number,
+): number {
+  return (
+    counts.frequency +
+    counts.pageCount * 2 +
+    counts.inHeadings * 4 +
+    counts.inTitle * 5 +
+    (flags.questionForm ? 3 : 0) +
+    (flags.comparisonForm ? 3 : 0) +
+    (flags.commercialForm ? 2 : 0) +
+    (flags.namedEntityForm ? 2 : 0) +
+    words * 1.5
+  )
+}
+
+function occurrencesIn(termWords: string[], slot: string[]): number {
+  let hits = 0
+  for (let i = 0; i + termWords.length <= slot.length; i += 1) {
+    let match = true
+    for (let j = 0; j < termWords.length; j += 1) {
+      if (slot[i + j] !== termWords[j]) {
+        match = false
+        break
+      }
+    }
+    if (match) hits += 1
+  }
+  return hits
+}
+
+interface MeasuredTerm {
+  pages: Set<string>
+  frequency: number
+  inHeadings: number
+  inTitle: number
+}
+
+/**
+ * Count a specific list of terms against the crawl. Same slot rules as
+ * `extractKeywords` — title trusted everywhere, H1 trusted everywhere, other
+ * headings and prose trusted only on pages that read as prose — so a term
+ * measured here and a term mined there get the same numbers for the same page.
+ *
+ * This is measurement, not mining: no frequency floor, no chrome penalty, no
+ * limit. A term nobody typed on our site and nobody put in a heading simply
+ * comes back zero, and zero is the honest answer and the whole point.
+ */
+function measureTerms(pages: PageEvidence[], terms: ReadonlySet<string>): Map<string, MeasuredTerm> {
+  const out = new Map<string, MeasuredTerm>()
+  for (const term of terms) {
+    out.set(term, { pages: new Set<string>(), frequency: 0, inHeadings: 0, inTitle: 0 })
+  }
+
+  for (const page of pages) {
+    const isChrome = page.linkDensity >= CHROME_LINK_DENSITY
+    const titleSlot = tokenise(page.title)
+    const headingSlots: Array<{ tokens: string[]; trusted: boolean }> = []
+    for (const heading of [page.h1, ...page.headings]) {
+      if (!heading) continue
+      headingSlots.push({ tokens: tokenise(heading), trusted: heading === page.h1 || !isChrome })
+    }
+    const proseSlot = isChrome ? null : tokenise(page.proseText)
+
+    for (const [term, m] of out) {
+      const termWords = term.split(" ")
+      let total = occurrencesIn(termWords, titleSlot)
+      m.inTitle += total
+      for (const slot of headingSlots) {
+        const hits = occurrencesIn(termWords, slot.tokens)
+        total += hits
+        if (slot.trusted) m.inHeadings += hits
+      }
+      if (proseSlot) total += occurrencesIn(termWords, proseSlot)
+
+      if (total > 0) {
+        m.frequency += total
+        m.pages.add(page.path)
+      }
+    }
+  }
+
+  return out
+}
+
+/**
+ * The second source of subject candidates, and the one that can find a gap.
+ *
+ * `extractKeywords` mines our own pages, so by construction every term it
+ * returns is a term we already say something about. It can report that our copy
+ * is weak; it can never report that we are silent. A presearch seed is the
+ * opposite case: it is a phrase somebody typed into a real search, and it may
+ * appear nowhere on our site at all.
+ *
+ * Two rules this function exists to keep:
+ *
+ * 1. **A seed is never measured by invention.** On-page counts come from
+ *    `measureTerms` or they are zero. There is no fallback that estimates a
+ *    frequency for a term we did not see, because a fabricated count would
+ *    become `opportunityOf`'s structural and spread terms and would then read
+ *    as though the crawler had found the term on our pages.
+ *
+ * 2. **A seed is never a new page on its own.** It becomes `typed_and_returned`
+ *    in `subjects.ts`, and that tier still has to clear `is_real_query`. What a
+ *    seed adds is a candidate — the judgement behind it is the same one every
+ *    other term gets, in the same call.
+ */
+export function mergeSeedCandidates(
+  pages: PageEvidence[],
+  mined: KeywordCandidate[],
+  seeds: ReadonlyArray<PresearchSeed> | undefined,
+): KeywordCandidate[] {
+  if (!seeds || seeds.length === 0) return mined
+
+  const seedMeta = new Map<string, PresearchSeed>()
+  for (const seed of seeds) {
+    const term = normalise(seed.term)
+    if (term.length === 0 || seedMeta.has(term)) continue
+    seedMeta.set(term, seed)
+  }
+
+  const { isProperName } = corpusStats(pages)
+  const merged = mined.map((candidate) => annotateSeed(candidate, seedMeta, isProperName))
+  const present = new Set(merged.map((candidate) => candidate.term))
+
+  const fresh = [...seedMeta.entries()]
+    .filter(([term]) => !present.has(term))
+    .slice(0, MAX_SEED_CANDIDATES)
+
+  if (fresh.length === 0) return merged
+
+  const measured = measureTerms(pages, new Set(fresh.map(([term]) => term)))
+  for (const [term, seed] of fresh) {
+    merged.push(seedCandidate(term, seed, measured.get(term), isProperName))
+  }
+
+  return merged.sort((a, b) => b.weight - a.weight)
+}
+
+function annotateSeed(
+  candidate: KeywordCandidate,
+  seedMeta: ReadonlyMap<string, PresearchSeed>,
+  isProperName: (word: string) => boolean,
+): KeywordCandidate {
+  const seed = seedMeta.get(candidate.term)
+  if (!seed) return candidate
+  return { ...candidate, ...seedFields(seed), origin: "presearch_seed" }
+}
+
+function seedFields(seed: PresearchSeed): {
+  seedIntent?: string
+  seedEvidenceTool?: string
+} {
+  return {
+    ...(seed.intent !== undefined ? { seedIntent: seed.intent } : {}),
+    ...(seed.evidence_tool !== undefined ? { seedEvidenceTool: seed.evidence_tool } : {}),
+  }
+}
+
+function seedCandidate(
+  term: string,
+  seed: PresearchSeed,
+  measured: MeasuredTerm | undefined,
+  isProperName: (word: string) => boolean,
+): KeywordCandidate {
+  const words = term.split(" ")
+  const { questionForm, comparisonForm, commercialForm } = wordingFlags(term)
+  const namedEntityForm = words.some(isProperName)
+  const queryShaped = questionForm || comparisonForm || commercialForm
+  const inHeadings = measured?.inHeadings ?? 0
+  const inTitle = measured?.inTitle ?? 0
+  const frequency = measured?.frequency ?? 0
+  const pageList = [...(measured?.pages ?? [])]
+
+  // Never measured on our own pages, so the on-page terms of the weight are all
+  // zero and what remains is the wording. Ordering only, never a threshold.
+  const weight =
+    frequency === 0
+      ? UNMEASURED_SEED_WEIGHT
+      : weightOf(
+          { frequency, pageCount: pageList.length, inHeadings, inTitle },
+          { questionForm, comparisonForm, commercialForm, namedEntityForm },
+          words.length,
+        )
+
+  return {
+    term,
+    words: words.length,
+    pages: pageList,
+    frequency,
+    inHeadings,
+    inTitle,
+    origin: "presearch_seed",
+    ...seedFields(seed),
+    questionForm,
+    comparisonForm,
+    commercialForm,
+    namedEntityForm,
+    broadForm: !namedEntityForm && !queryShaped && words.every((w) => !isProperName(w)),
+    weight: Number(weight.toFixed(2)),
+  }
 }

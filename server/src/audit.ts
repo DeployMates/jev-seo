@@ -51,7 +51,7 @@ import {
 } from "./questions.js"
 import { buildGapRow, type GapRow } from "./gap.js"
 import { buildRivalGapState, type GapPage } from "./state.js"
-import { extractKeywords, type KeywordCandidate } from "./keywords.js"
+import { extractKeywords, mergeSeedCandidates, type KeywordCandidate } from "./keywords.js"
 import {
   decisionPriority,
   reachOf,
@@ -61,7 +61,37 @@ import {
   type TopChange,
 } from "./decisions.js"
 import { buildSubjects, seedSet, type SubjectRow } from "./subjects.js"
+import { diffRuns, loadHistory, recordRun, type HistoryRun, type RunDelta } from "./history.js"
 import { HIGHEST_IMPACT_CHANGES } from "./questions.js"
+
+/** Rivals past this cap are reported as uncrawled rather than silently dropped. */
+const MAX_COMPETITORS = 5
+
+/**
+ * Gap rows allowed when no rival was crawled at all.
+ *
+ * Mined terms keep the rival gate unchanged — a comparison needs two sides. A
+ * presearch seed does not: "this was typed, and we have nothing on it" is a gap
+ * that holds with no competitor in existence, and gating it on a rival is what
+ * left panel 03 empty on every bare audit. Bounded because each row is a Jev
+ * request.
+ */
+const MAX_RIVAL_LESS_GAP_ROWS = 8
+
+export interface RivalCap {
+  /** The cap that was actually applied, after clamping. */
+  cap: number
+  /** Rivals named in the request, after trimming. */
+  requested: number
+  /** Rivals actually crawled. */
+  attempted: number
+  /** Rivals that came back reachable and were judged. */
+  judged: number
+  /** Sent but not judged: the origin refused us. */
+  unreachable: string[]
+  /** Never sent, because they were past the cap. */
+  pastTheCap: string[]
+}
 
 export type Band = "act" | "review" | "escalate"
 
@@ -314,6 +344,17 @@ export interface AuditReport {
   rivalProposals: AuditRivalProposal[]
   keywordPool: KeywordCandidate[]
   competitors: CompetitorResult[]
+  /**
+   * How many rivals were named, and how many were judged. Two numbers, because
+   * a cap that only appears in the code is a cap nobody can see: a user who sent
+   * nine rivals and got four rivals back has been silently truncated, and the
+   * report is the only place that can say so. See `RivalCap` for the detail.
+   */
+  rivalsRequested: number
+  rivalsJudged: number
+  rivalCap: RivalCap
+  /** This run against the previous one for the same root. See `history.ts`. */
+  delta: RunDelta
   linkSuggestions: LinkSuggestion[]
   siteJudgements: Record<string, unknown> | null
   needsHuman: Array<{ url: string; reasons: string[] }>
@@ -1107,7 +1148,16 @@ export async function runAudit(request: AuditRequest, emit: (event: AuditEvent) 
   const aiGap: PatternCount[] = []
   const judgedPages: PageJudgement[] = []
   const keywordBudget = Math.max(0, Math.min(request.maxKeywords ?? 30, MAX_PAGES_CEILING))
-  const keywordPool = extractKeywords(crawlResult.pages, keywordBudget)
+  // Two sources, one pool. The miner can only ever return a term we already say
+  // something about, so a pool built from it alone can report weak copy but
+  // never silence. Presearch seeds are the terms somebody else typed, which is
+  // the only way a gap gets found. On-page counts for a seed are measured or
+  // zero — `mergeSeedCandidates` never estimates one.
+  const keywordPool = mergeSeedCandidates(
+    crawlResult.pages,
+    extractKeywords(crawlResult.pages, keywordBudget),
+    request.keywordSeeds,
+  )
   const judgedKeywords: KeywordJudgement[] = []
   const competitors: CompetitorResult[] = []
   const gaps: GapRow[] = []
@@ -1119,6 +1169,35 @@ export async function runAudit(request: AuditRequest, emit: (event: AuditEvent) 
   let questionsAsked = 0
   let judgementCount = 0
   let authFailed = false
+
+  // Rival bookkeeping sits outside the `runJev` branch on purpose: a run that
+  // judged no rivals because the judge was switched off must still report that
+  // four were asked for, or the cap reads as a clean zero rather than a stop.
+  const requestedRivals = (request.competitors ?? [])
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0)
+  // Clamped, not just defaulted. `maxCompetitors` arrives from a request body, so
+  // `null`, a string, `NaN` and a negative all reach it, and each used to reach
+  // `slice(0, cap)` unchanged: `NaN` silently judged every rival and `-1` judged
+  // none, both without saying a word.
+  const rivalCapApplied = Math.max(
+    0,
+    Math.min(
+      typeof request.maxCompetitors === "number" && Number.isFinite(request.maxCompetitors)
+        ? request.maxCompetitors
+        : MAX_COMPETITORS,
+      MAX_COMPETITORS,
+    ),
+  )
+  const rivalUrls = requestedRivals.slice(0, rivalCapApplied)
+  const pastTheCap = requestedRivals.slice(rivalCapApplied)
+  // Normalised the same way `subjects.ts` normalises, so the gap pass and the
+  // tier check agree on which terms are seeds.
+  const seedTermKeys = new Set(
+    (request.keywordSeeds ?? [])
+      .map((seed) => seed.term.toLowerCase().replace(/\s+/g, " ").trim())
+      .filter((term) => term.length > 0),
+  )
 
   if (runJev) {
     // Site-level judgement: one call over the whole crawled set.
@@ -1305,10 +1384,13 @@ export async function runAudit(request: AuditRequest, emit: (event: AuditEvent) 
       }
 
       // Competitor pass: same rubric on each rival so the scorecards compare.
-      const rivalUrls = (request.competitors ?? [])
-        .map((value) => value.trim())
-        .filter((value) => value.length > 0)
-        .slice(0, request.maxCompetitors ?? 5)
+      if (pastTheCap.length > 0) {
+        emit({
+          type: "stage",
+          stage: "Competitors",
+          detail: `Judging the first ${rivalUrls.length} of ${requestedRivals.length} rivals — the rest are past the ${rivalCapApplied}-rival cap and are never crawled`,
+        })
+      }
 
       if (rivalUrls.length > 0) {
         emit({ type: "stage", stage: "Competitors", detail: `Comparing against ${rivalUrls.length} rivals` })
@@ -1339,12 +1421,24 @@ export async function runAudit(request: AuditRequest, emit: (event: AuditEvent) 
       // only worth a request once we know the term is real and a buyer types it.
       // Skipping the rest is what keeps this from doubling the run's cost.
       const gapTerms = gapCandidates(judgedKeywords, request.maxGaps ?? 8)
+      const rivalPageTotal = competitors.filter((c) => c.reachable).length
+      // Mined terms still need a rival: a comparison is two-sided. A presearch
+      // seed does not — "this was typed and we hold nothing on it" is a gap
+      // whether or not a competitor exists, and requiring one is what kept
+      // panel 03 empty on every bare audit.
+      const gapRun = rivalPageTotal
+        ? gapTerms
+        : gapTerms
+            .filter((term) => seedTermKeys.has(term.term))
+            .slice(0, MAX_RIVAL_LESS_GAP_ROWS)
 
-      if (gapTerms.length > 0 && competitors.some((c) => c.reachable)) {
+      if (gapRun.length > 0) {
         emit({
           type: "stage",
           stage: "Gaps",
-          detail: `Comparing ${gapTerms.length} term(s) against the rivals`,
+          detail: rivalPageTotal
+            ? `Comparing ${gapRun.length} term(s) against the rivals`
+            : `Checking ${gapRun.length} presearch term(s) — no rival was crawled, so these rows say nothing about competitors`,
         })
 
         // The rival side of the state is built from the titles the competitor
@@ -1370,7 +1464,8 @@ export async function runAudit(request: AuditRequest, emit: (event: AuditEvent) 
         }
 
         const GAP_QUESTIONS = rivalGapQuestions()
-        await pool(gapTerms, concurrency, async (keyword) => {
+        const rivalPagesInView = rivalPages.slice(0, 8)
+        await pool(gapRun, concurrency, async (keyword) => {
           const term = keyword.term
           try {
             const ourPages = crawlResult.pages.filter((p) =>
@@ -1380,7 +1475,7 @@ export async function runAudit(request: AuditRequest, emit: (event: AuditEvent) 
               {
                 term,
                 ourPages,
-                rivalPages: rivalPages.slice(0, 8),
+                rivalPages: rivalPagesInView,
                 onOurPages: keyword.pages.map((p) => p.replace(/^crawl:/, "")),
                 business: context,
               },
@@ -1390,14 +1485,17 @@ export async function runAudit(request: AuditRequest, emit: (event: AuditEvent) 
             const gap = buildGapRow({
               term,
               answers: result.answers,
-              signals: { onOurPages: keyword.pages.map((p) => p.replace(/^crawl:/, "")) },
+              signals: {
+                onOurPages: keyword.pages.map((p) => p.replace(/^crawl:/, "")),
+                rivalPagesCrawled: rivalPagesInView.length,
+              },
               model,
               ms: result.receipt.ms,
               costUsd: result.receipt.costUsd,
               inputTokens: result.receipt.inputTokens,
             })
             if (gap.rivalServes) {
-              gap.rivalPaths = rivalPages.slice(0, 8).map((p) => p.title)
+              gap.rivalPaths = rivalPagesInView.map((p) => p.title)
             }
             gaps.push(gap)
             judgementCount += 1
@@ -1509,6 +1607,66 @@ export async function runAudit(request: AuditRequest, emit: (event: AuditEvent) 
     "business_model",
   )
 
+  // The cap, stated rather than applied. `rivalsRequested` is what the user sent
+  // and `rivalsJudged` is what came back, so a truncated run is legible without
+  // reading the code. `pastTheCap` names exactly which rivals were never looked
+  // at — a rival that is silently absent is indistinguishable from one that was
+  // judged and found wanting.
+  const judgedRivals = competitors.filter((c) => c.reachable)
+  const rivalCap: RivalCap = {
+    cap: rivalCapApplied,
+    requested: requestedRivals.length,
+    attempted: competitors.length,
+    judged: judgedRivals.length,
+    unreachable: competitors.filter((c) => !c.reachable).map((c) => c.url),
+    pastTheCap,
+  }
+
+  const snapshot: HistoryRun = {
+    root: crawlResult.root.toString(),
+    generatedAt: new Date().toISOString(),
+    score,
+    grade: gradeFrom(score),
+    model,
+    pagesCrawled: crawlResult.pages.length,
+    pagesJudged: judgedPages.length,
+    openPages: 0,
+    competitorsJudged: judgedRivals.length,
+    subjectCount: subjects.length,
+    pages: crawlResult.pages.map((page) => {
+      const judged = judgedPages.find((p) => p.path === page.path)
+      const decision = decisions.find((d) => d.path === page.path)
+      const actFinding = judged?.findings.some((f) => f.band === "act") ?? false
+      return {
+        path: page.path,
+        url: page.url,
+        open: decision != null || actFinding,
+        topChange: decision?.topChange.instruction ?? null,
+        band: decision?.topChange.band ?? judged?.band ?? null,
+        findings: judged?.findings.length ?? 0,
+        ruleFindings: ruleFindings.filter((f) => f.pages.includes(page.path)).length,
+        words: page.words,
+      }
+    }),
+  }
+  snapshot.openPages = snapshot.pages.filter((page) => page.open).length
+
+  // Read the previous run BEFORE recording this one, or every run is its own
+  // baseline and the delta is always empty.
+  const previousRun = loadHistory(crawlResult.root.toString())[0] ?? null
+  const delta = diffRuns(snapshot, previousRun)
+  const stored = recordRun(snapshot)
+  if (!stored.stored) {
+    // History is a convenience, so a failed write never fails the audit — but
+    // it is reported rather than swallowed, because a silent history is a
+    // history the user will trust and find empty.
+    emit({
+      type: "error",
+      url: crawlResult.root.toString(),
+      message: `this run's history could not be saved: ${stored.error ?? "unknown reason"}`,
+    })
+  }
+
   const report: AuditReport = {
     url: request.url,
     root: crawlResult.root.toString(),
@@ -1521,7 +1679,7 @@ export async function runAudit(request: AuditRequest, emit: (event: AuditEvent) 
     },
     model,
     jevAssessed: runJev && judgedPages.length > 0,
-    generatedAt: new Date().toISOString(),
+    generatedAt: snapshot.generatedAt,
     totals,
     score,
     grade: gradeFrom(score),
@@ -1541,6 +1699,10 @@ export async function runAudit(request: AuditRequest, emit: (event: AuditEvent) 
     rivalProposals: proposalsIn,
     keywordPool,
     competitors,
+    rivalsRequested: rivalCap.requested,
+    rivalsJudged: rivalCap.judged,
+    rivalCap,
+    delta,
     linkSuggestions: linkSuggestions.slice(0, 20),
     siteJudgements,
     needsHuman: judgedPages

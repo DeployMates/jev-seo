@@ -170,6 +170,52 @@ export interface AuditReport {
   /** Pages judged for which the gate produced no DecisionRow, with the reason. */
   notDecided: Array<{ path: string; url: string; reason: string }>
   presearch: { ran: boolean; degraded: boolean; reason: string | null }
+  rivalsRequested: number
+  rivalsJudged: number
+  rivalCap: RivalCap
+  /** This run against the previous one for the same root. */
+  delta: RunDelta
+}
+
+/* ── the rival cap, stated rather than applied (mirrors server/src/audit.ts) ── */
+
+export interface RivalCap {
+  cap: number
+  requested: number
+  attempted: number
+  judged: number
+  unreachable: string[]
+  pastTheCap: string[]
+}
+
+/* ── run diff (mirrors server/src/history.ts) ──
+ * `open` is a disjunction — a decisive top change OR an act-band finding — and
+ * that is the only thing the diff tracks. It is not a ranking and not a
+ * position, because this system has neither. */
+
+export type DeltaState = "fixed" | "still_open" | "new" | "regressed" | "clean"
+
+export interface PageDelta {
+  path: string
+  url: string
+  state: DeltaState
+  openNow: boolean
+  openBefore: boolean
+  topChange: string | null
+}
+
+export interface RunDelta {
+  /** `null` is the first run for this root, not a degenerate case. */
+  baseline: null | { generatedAt: string; score: number; openPages: number }
+  scoreDelta: number | null
+  fixed: PageDelta[]
+  stillOpen: PageDelta[]
+  new: PageDelta[]
+  regressed: PageDelta[]
+  /** A count, not a list — there is nothing to render per row. */
+  clean: number
+  pagesCrawledNow: number
+  pagesCrawledBefore: number
 }
 
 /** One page as the crawler measured it. Countable in code — no model wrote a field of this shape. */
@@ -322,6 +368,12 @@ export interface AuditForm {
   competitors: string
   maxPages: number
   maxKeywords: number
+  /**
+   * How many rivals this run may judge. The server already honours this
+   * (`audit.ts:1314`); the client simply never sent the field, so the cap was
+   * unchangeable from the form.
+   */
+  maxCompetitors: number
   concurrency: number
   runJev: boolean
 }

@@ -23,6 +23,7 @@
  * `node_modules` it found the wrong thing.
  */
 import { existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs"
+import { createHash } from "node:crypto"
 import { homedir } from "node:os"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -86,6 +87,24 @@ export function logsDir(): string {
 
 export function researchDir(): string {
   return ensureDir(resolve(logsDir(), "research"))
+}
+
+/**
+ * One file per audited root, holding the last N run snapshots.
+ *
+ * The filename is a truncated SHA-256 of the root's origin, never the host
+ * itself: a host is request-controlled, and the same rule `gscKeyPath` follows —
+ * a fixed, server-owned location, never a path built out of a request. The
+ * un-hashed root is written inside the file, so a collision is visible instead
+ * of silently merging two sites' history.
+ */
+export function historyPath(origin: string): string {
+  const key = createHash("sha256").update(origin).digest("hex").slice(0, 32)
+  return resolve(historyDir(), `${key}.json`)
+}
+
+export function historyDir(): string {
+  return ensureDir(resolve(dataDir(), "history"), 0o700)
 }
 
 export function serverLogPath(): string {

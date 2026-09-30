@@ -75,6 +75,16 @@ const STRONG_AT_OR_ABOVE = 3
 export interface GapSignals {
   /** Paths of our own pages the term already appears on. Code counted these. */
   onOurPages: readonly string[]
+  /**
+   * How many rival pages were actually crawled for this run.
+   *
+   * Zero is a real case, not an edge case: the gap pass now also runs over
+   * presearch seeds when no rival was crawled, because "somebody typed this and
+   * we have nothing on it" is a real gap that does not need a competitor to
+   * exist. On such a row `rival_serves` is unanswerable, and the reasons below
+   * have to say that rather than assert something nobody looked at.
+   */
+  rivalPagesCrawled?: number
   /** Ranks at which the rival was seen carrying the term, 1-based, if known. */
   rivalRank?: number | null
 }
@@ -322,9 +332,16 @@ export function reasonsFor(bucket: GapBucket, answers: Answers, signals: GapSign
   const reasons: string[] = []
   const rivalServes = noulP(answers, "rival_serves") >= 0.5
   const ourServes = noulP(answers, "our_serves") >= 0.5
+  const rivalsLooked = (signals.rivalPagesCrawled ?? 0) > 0
 
+  // The distinction the whole row rests on: "we looked and found nothing" and
+  // "we never looked" are different facts, and only the first is a finding.
   reasons.push(
-    rivalServes ? "A rival page is written to answer this term" : "No rival page targets this term",
+    !rivalsLooked
+      ? "No rival site was crawled for this run, so this row says nothing about rivals"
+      : rivalServes
+        ? "A rival page is written to answer this term"
+        : "No rival page targets this term",
   )
   reasons.push(
     ourServes
@@ -346,11 +363,15 @@ export function reasonsFor(bucket: GapBucket, answers: Answers, signals: GapSign
  * two nouls that both sat near 0.5 is a guess, and is reported as one rather
  * than acted on.
  */
-function needsHumanFor(answers: Answers, bucket: GapBucket): boolean {
+function needsHumanFor(answers: Answers, bucket: GapBucket, signals: GapSignals): boolean {
   if (noulP(answers, "is_real_query") < 0.5) return true
   if (bucket === "missing" && noulP(answers, "our_serves") > 0.35) return true
   if (bucket === "untapped" && noulP(answers, "rival_serves") > 0.65) return true
   if (bandForNoul(noulP(answers, "our_serves")) === "review") return true
+  // Half of a comparison was never made. The row is still published — a seed
+  // with no page of ours is a real gap — but it is flagged, because the bucket
+  // it landed in says nothing about rivals and everything about us.
+  if ((signals.rivalPagesCrawled ?? 0) === 0) return true
   return false
 }
 
@@ -409,7 +430,7 @@ export function buildGapRow(meta: GapMeta): GapRow {
     rivalServes: noulP(answers, "rival_serves") >= 0.5,
     priority: priorityFor(bucket, answers, signals),
     band: bandForGap(bucket, answers),
-    needsHuman: needsHumanFor(answers, bucket),
+    needsHuman: needsHumanFor(answers, bucket, signals),
     reasons: reasonsFor(bucket, answers, signals),
     probabilities,
     model: meta.model,

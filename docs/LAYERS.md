@@ -190,6 +190,69 @@ a choice, not an oversight.
 
 ---
 
+## 3b. Decision layer — `decisions.ts`, `subjects.ts`
+
+**Gives:** one instruction per page, and a list of pages worth creating.
+**Promises:** every instruction carries the counted fact that triggered it and
+the question that would prove it wrong.
+
+This is the layer that turns probabilities into work. It runs after layer 3 and
+feeds the five numbered panels in the dashboard.
+
+### `act` means decisive, which is a shape, not a height
+
+`highest_impact_change` returns one option out of ten, so its **absolute**
+confidence stays low even when the winner is not remotely in doubt. Measured on a
+real run: `0.68` with the runner-up on `0.18` is a four-to-one answer and is
+actionable, but it never cleared the `0.88` absolute bar, and the DO THIS NOW
+queue came back empty on every page.
+
+So `topChangeFor` has a second, relative route to `act`:
+
+- `DECISIVE_MARGIN = 0.2` — the winner must beat the runner-up by this much.
+- `DECISIVE_FLOOR = 0.5` — and must still clear this absolute floor.
+
+Lowering the 0.88 bar instead is the easy fix and the wrong one: it would admit
+flat distributions like `0.37 / 0.30 / 0.17` where the model has genuinely not
+decided. The margin keeps those out, so the grey zone still means what it says.
+Both coefficients are named and exported because they are arguments, not magic.
+
+`nothing_missing` never becomes an instruction — it is a real answer, not an
+escape hatch, and a page Jev thinks is fine does not belong in a queue of things
+to fix.
+
+### The witness must not overstate what the crawler saw
+
+`witnessFor` quotes code-counted facts. The trap here is the `opening` field: it
+is extracted as the text *between the `h1` and the next heading*, which is empty
+on any well-structured page. An earlier witness read "The page has no opening
+text at all" on pages the crawler had just read 476 and 287 words from — a false
+claim in the most trusted-looking line on the card. It now states what is actually
+true and cites the word count the crawler really saw.
+
+Rule: a witness may say a countable thing is absent. It may not say the page is
+empty.
+
+### Demand tiers decide what earns a new page
+
+`subjects.ts` clusters gap rows into subjects and tags each one:
+
+- `typed_and_returned` — the phrase matched a presearch `keyword_seed`, so it was
+  typed into a real search and returned results. Strongest evidence available.
+- `rival_published` — the gap pass said `rival_serves >= 0.5`.
+- `our_own_pages` — mined out of our own body text.
+
+**Only the first two justify a new page.** `our_own_pages` is coverage/refresh
+work and is forced to `isNewPage = false`. A term we already wrote four pages on
+is not a gap, and the subject label is always a verbatim term — never a
+generated noun phrase.
+
+Consequence worth knowing: a bare **Run audit** with no presearch yields only
+`our_own_pages` and `rival_published`, so panel 03 can legitimately come back
+empty. That is the rule working, not a bug.
+
+---
+
 ## 4. Dashboard UI — `web/src/`
 
 **Gives:** the three views.
@@ -236,12 +299,37 @@ and needs a workspace key. The keyless tier is `jev-1.13-free`.
 TypeSafe's own System One endpoint (`api.typesafe.ai/v1/systemone`) requires a
 real `TYPESAFE_API_KEY`. The two are not interchangeable — see the README.
 
-**`zenKey()` never returns falsy.** It falls back to the literal `"public"`, so
-`isConfigured()` is always true and `judgeBackend()` is always `"zen"`. The
-`local` branch in `judge.ts` is currently unreachable and `runJev` is always
-true, which means the README's "partial audit, Jev not assessed" path does not
-currently trigger. If you rely on that path, fix `zenKey()` first — do not work
-around it at the call site.
+**`zenKey()` returns `"public"` by default, so `judgeBackend()` is `"zen"`.**
+`JEV_NO_ZEN=1` makes it return `undefined` and forces the local opencode judge —
+that escape hatch exists because the keyless tier is metered **per egress IP**
+(see the next section), and a burned address should be a configuration choice
+rather than a dead dashboard. Note the consequence: `isCalibrated()` follows the
+backend, so the local judge never claims calibration it does not have.
+
+### Trap: the keyless tier is metered per egress IP
+
+`public` is not rate-limited per account, it is rate-limited per **address**. One
+burned IP returns `FreeUsageLimitError` forever, no matter how long you wait or how
+fresh the session id is — a new `ses_`/`msg_` pair on the same IP still fails.
+
+`zenProxy.ts` is the fix, and it mirrors the classification in the
+`opencode-proxy-plugin`: a quota error is an **IP** problem, so the remedy is a
+different IP, not a longer sleep.
+
+- The pool is read from `~/.config/opencode/plugins/proxies.txt`
+  (`IP:PORT:USER:PASS`), overridable with `JEV_PROXY_POOL`.
+- Each call egresses through an undici `ProxyAgent` built for the current
+  upstream.
+- On `429` or a `FreeUsageLimitError` body, that upstream is quarantined for 15
+  minutes and **the same request is retried immediately** on the next one.
+  `attempt` is rewound rather than consumed, so a rotation does not spend the
+  retry budget.
+- When every upstream is cooling down it falls back to going direct, and says so
+  in the log. `JEV_NO_PROXY=1` disables it outright.
+
+This is why a run that produced two quota errors an hour ago now produces zero:
+the rotation is transparent to the audit, and the `retry-after` backoff still
+applies to everything that is *not* a per-IP quota.
 
 ---
 

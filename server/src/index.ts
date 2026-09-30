@@ -15,7 +15,8 @@ import { resolve } from "node:path"
 import { DEFAULT_CONCURRENCY, DEFAULT_MAX_PAGES, PORT } from "./config.js"
 import { envFileLoaded } from "./config.js"
 import { dataDir, probeWritable, webDist } from "./paths.js"
-import { runAudit, type AuditEvent } from "./audit.js"
+import { runAudit, type AuditEvent, type AuditKeywordSeed, type AuditMetric, type AuditRivalProposal } from "./audit.js"
+import { HISTORY_LIMIT, diffRuns, loadHistory } from "./history.js"
 import { crawlForResearch } from "./crawlDigest.js"
 import {
   isCalibrated,
@@ -218,6 +219,33 @@ app.post("/api/audit", (req, res) => {
       ? body.competitors.split(/[\n,]/).map((value: string) => value.trim()).filter(Boolean)
       : []
 
+  // The presearch passthrough, filtered to the fields the schema guarantees. The
+  // client already holds all three and they were being dropped here, which is
+  // why the seed pool never reached the keyword pass: `keywordSeeds` is the only
+  // source of a term we do not already say something about, so dropping it left
+  // the gap panel with nothing to find.
+  const keywordSeeds = Array.isArray(body.keywordSeeds)
+    ? (body.keywordSeeds as unknown[])
+        .filter(
+          (value): value is AuditKeywordSeed =>
+            typeof value === "object" &&
+            value !== null &&
+            typeof (value as { term?: unknown }).term === "string" &&
+            (value as { term: string }).term.trim().length > 0,
+        )
+        .map((seed) => ({
+          term: seed.term.trim(),
+          intent: typeof seed.intent === "string" ? seed.intent : "unknown",
+          evidence_tool:
+            typeof seed.evidence_tool === "string" ? seed.evidence_tool : "presearch",
+        }))
+    : undefined
+
+  const metrics = Array.isArray(body.metrics) ? (body.metrics as AuditMetric[]) : undefined
+  const rivalProposals = Array.isArray(body.rivalProposals)
+    ? (body.rivalProposals as AuditRivalProposal[])
+    : undefined
+
   void runAudit(
     {
       url,
@@ -226,10 +254,14 @@ app.post("/api/audit", (req, res) => {
       market: body.market,
       maxPages: body.maxPages,
       maxKeywords: body.maxKeywords,
+      maxGaps: body.maxGaps,
       maxCompetitors: body.maxCompetitors,
       concurrency: body.concurrency,
       runJev: body.runJev,
       competitors,
+      keywordSeeds,
+      metrics,
+      rivalProposals,
     },
     send,
   )
@@ -243,6 +275,35 @@ app.post("/api/audit", (req, res) => {
     .finally(() => {
       if (!res.writableEnded) res.end()
     })
+})
+
+app.get("/api/history", (req, res) => {
+  const url = typeof req.query.url === "string" ? req.query.url.trim() : ""
+  if (!url) {
+    res.status(400).json({ error: "A url query parameter is required." })
+    return
+  }
+  let root: string
+  try {
+    root = new URL(url).origin
+  } catch {
+    res.status(400).json({ error: "That url could not be read as a website address." })
+    return
+  }
+
+  const runs = loadHistory(root)
+  const [current, previous] = runs
+  // A single run has no baseline, so `delta.baseline` is null rather than a diff
+  // against itself — which would report every open page as "new" and imply
+  // progress the site has not made.
+  const delta = current ? diffRuns(current, previous ?? null) : null
+
+  res.json({
+    root,
+    runs,
+    delta,
+    limit: HISTORY_LIMIT,
+  })
 })
 
 /* -------------------------------------------------------------------------- */

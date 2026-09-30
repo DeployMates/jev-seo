@@ -1,5 +1,6 @@
 import type { CompetitorProposal, MetricProposal } from "./researchTypes"
 import type { CompetitorResult } from "./types"
+import type { RivalSlot } from "./rivals"
 import "./decisions.css"
 
 const REFUSAL =
@@ -32,9 +33,35 @@ function ScoreRow({ rival }: { rival: CompetitorResult }) {
   )
 }
 
+/**
+ * The row a rival occupies while it is being crawled. It sits in the same
+ * position the finished row will take, so panel 04 shows the dequeue instead of
+ * a gap. A stopped run leaves these behind deliberately — a rival that was
+ * never judged is not a rival that was cleared.
+ */
+function PendingRow({ requested, running }: { requested: string; running: boolean }) {
+  return (
+    <div className="comp pending" aria-busy="true">
+      <div className="g">…</div>
+      <div className="d">
+        <div className="h">{requested.replace(/^https?:\/\//, "")}</div>
+        <div className="m">{running ? "crawling and judging this rival" : "not judged — the run stopped first"}</div>
+      </div>
+      <div className="s">–</div>
+      <div className="copy" />
+    </div>
+  )
+}
+
 export interface RivalsPanelProps {
   self: { url: string; score: number | null; grade: string; meta: string }
   rivals: CompetitorResult[]
+  /**
+   * Dequeue order, including rivals still being crawled. The panel renders
+   * this list rather than `rivals`, so a pending rival keeps its row and the
+   * finished one replaces it in place instead of being appended.
+   */
+  slots: RivalSlot[]
   proposals: CompetitorProposal[]
   metrics: MetricProposal[]
   running: boolean
@@ -49,6 +76,7 @@ export interface RivalsPanelProps {
 export function RivalsPanel({
   self,
   rivals,
+  slots,
   proposals,
   metrics,
   running,
@@ -65,8 +93,12 @@ export function RivalsPanel({
   )
   const worthCopying = reachable.filter((r) => r.worthCopying >= 0.5).length
 
+  const rivalsReachable = rivals.filter((c) => c.reachable).length
+  const rivalsJudged = rivals.length
+  const rivalsUnfinished = slots.length - rivalsJudged
+
   let scorecardEmpty: { head: string; body: string; see?: string } | null = null
-  if (!running && rivals.length === 0) {
+  if (!running && slots.length === 0) {
     if (!hasRun) {
       scorecardEmpty = {
         head: "no run yet",
@@ -80,7 +112,7 @@ export function RivalsPanel({
     } else {
       scorecardEmpty = {
         head: "no rival was reachable",
-        body: `All ${requested} rivals were crawled without a usable result. This is a reachability problem, not a content one.`,
+        body: `None of the ${rivalsJudged} rivals this run actually attempted returned a usable page. ${requested > rivalsJudged ? `${requested - rivalsJudged} more were listed but sit past the ${rivalsJudged}-rival cap, so they were never crawled. ` : ""}This is a reachability problem, not a content one.`,
         see: "fix the rivals and re-run rather than writing these off",
       }
     }
@@ -111,12 +143,16 @@ export function RivalsPanel({
                 <div className="s">{self.score ?? "–"}</div>
                 <div className="copy" />
               </div>
-              {rivals.map((rival) => (
-                <ScoreRow key={rival.url} rival={rival} />
-              ))}
+              {slots.map((slot) =>
+                slot.result ? (
+                  <ScoreRow key={slot.key} rival={slot.result} />
+                ) : (
+                  <PendingRow key={slot.key} requested={slot.requested} running={running} />
+                ),
+              )}
             </div>
             <p className="rnote">
-              {rivals.length} of {requested || rivals.length} rivals reachable.
+              {rivalsReachable} of {requested || rivalsReachable} rivals reachable.
               {self.score === null
                 ? " Your own score appears here once the audit finishes."
                 : best === null
