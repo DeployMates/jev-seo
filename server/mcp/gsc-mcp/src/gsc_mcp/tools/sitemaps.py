@@ -39,38 +39,7 @@ def list_sitemaps(site: str, account: str = "") -> str:
 
 
 @with_retry()
-def submit_sitemap(site: str, sitemap_url: str, account: str = "") -> str:
-    """Submit a new sitemap URL to a GSC property. If already submitted, GSC updates the existing entry."""
-    svc = get_searchconsole_service(account=account)
-    svc.sitemaps().submit(siteUrl=site, feedpath=sitemap_url).execute()
-    return json.dumps(with_meta(
-        {"site": site, "sitemap_url": sitemap_url, "status": "submitted"},
-        tool="submit_sitemap",
-        params={"site": site, "sitemap_url": sitemap_url},
-    ))
-
-
 @with_retry()
-def sitemaps_delete(site: str, sitemap_url: str, account: str = "") -> str:
-    """Delete a submitted sitemap from a GSC property.
-
-    Requires the URL to end with '.xml' or contain '/sitemap' as a safety guard against
-    accidental deletion. Removes the entry from GSC tracking only; does not delete the sitemap file.
-    """
-    if not (sitemap_url.endswith(".xml") or "/sitemap" in sitemap_url):
-        raise ValueError(
-            f"Refusing to delete '{sitemap_url}': path does not look like a sitemap "
-            "(must end with '.xml' or contain '/sitemap')."
-        )
-    svc = get_searchconsole_service(account=account)
-    svc.sitemaps().delete(siteUrl=site, feedpath=sitemap_url).execute()
-    return json.dumps(with_meta(
-        {"site": site, "sitemap_url": sitemap_url, "status": "deleted"},
-        tool="sitemaps_delete",
-        params={"site": site, "sitemap_url": sitemap_url},
-    ))
-
-
 @with_retry()
 def sitemaps_get(site: str, sitemap_url: str, account: str = "") -> str:
     """Get details for a specific sitemap already submitted to a GSC property.
@@ -115,7 +84,7 @@ def sitemap_audit(site: str, sitemap_url: str, account: str = "") -> str:
         if urlparse(url).netloc != origin:
             return None
         try:
-            from gsc_mcp.url_safety import URLSafetyError, validate_url_strict
+            from gsc_mcp.url_safety import validate_url_strict
             validate_url_strict(url)
         except Exception:
             return None

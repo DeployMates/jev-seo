@@ -179,8 +179,8 @@ export function PagesToBuild({
           <>
             <b>everything is already covered</b>
             <p>
-              Every judged term is already on your own pages, so this is refresh work. Find the work in 02
-              do this now.
+              Every judged term is already on your own pages, so this is refresh work. Find the work in 02,
+              to do on your site.
             </p>
           </>
         ) : (

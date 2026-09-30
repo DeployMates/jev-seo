@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react"
+import { useEffect, useState } from "react"
 import "./capacity.css"
 
 /* ──────────────────────────────────────────────────────────────
@@ -12,6 +12,14 @@ import "./capacity.css"
    and every branch of that function produces a gap list. A gap
    without a fix is a decoration, so `deriveCapacity` cannot return
    a state the UI cannot act on.
+
+   This file is the *logic*. It renders nothing: the presentation is
+   `CapacityCluster.tsx`, which draws the same three checks as a
+   header icon cluster and this file's gaps inside a dropdown. The
+   split exists so there is exactly one derivation of the state, and
+   two surfaces cannot drift apart. `deriveCapacity`, `checkViews`
+   and every string they return are load-bearing and verified
+   against docs/UX-VALUE.md — do not retune them to suit a layout.
    ────────────────────────────────────────────────────────────── */
 
 /* ── the three checks, as the server reports them ────────────── */
@@ -35,27 +43,6 @@ export interface GscCheck {
   /** false until the first answer lands. Renders as "unknown", never "✗". */
   checked: boolean
   checking: boolean
-}
-
-export interface CapacityBadgeProps {
-  /** The URL about to be audited. Shown so a fix targets the right property. */
-  url: string
-  /** Resolved server-side. The Zen key never reaches the browser. */
-  jevConfigured: boolean
-  /** False when the local chat model is judging: it returns plausible numbers, not calibrated ones. */
-  jevCalibrated?: boolean
-  /** The opencode binary is on PATH and a model id is set. */
-  agentConfigured: boolean
-  agentModel?: string | null
-  gsc: GscCheck
-  /** Opens the onboarding modal — the fix for every GSC gap. */
-  onOpenOnboarding: () => void
-  /** Re-runs `GET /api/gsc/status`. Cheap, so it is always offered. */
-  onRecheck: () => void
-  /** Render the gaps list by default. */
-  defaultExpanded?: boolean
-  /** Extra content rendered in the foot strip. */
-  children?: ReactNode
 }
 
 /* ── derivation. Total, pure, exported so it can be tested. ──── */
@@ -239,11 +226,17 @@ export function deriveCapacity(input: {
     state = "crawl"
   }
 
+  // The distinction `reduced` reports is *which* prompt the research layer gets,
+  // not how well anything is judged. Jev judges the same crawled text either
+  // way; what a missing key changes is that the research pass has no first-party
+  // data and so describes the market instead (Prompt B, not a weaker Prompt A).
+  // Saying "judged from the market rather than your own data" got that backwards
+  // — the judgement never came from Search Console in the first place.
   const summary =
     state === "full"
-      ? "Every layer is on. Jev is reading your own Search Console data, not describing the market."
+      ? "Every layer is on. The research pass reads your own Search Console data, so rivals and keywords carry a source."
       : state === "reduced"
-        ? "Judged properly, from the market rather than your own data. Fix the gap below to close the difference."
+        ? "Jev judges every page from the crawled text. The research pass, without first-party data, can only describe the market."
         : state === "crawl"
           ? "Crawl and rule checks only — no model judgement. Everything below is one command away."
           : "No run is possible yet. The crawl still happens, but nothing can be judged or scored."
@@ -253,16 +246,16 @@ export function deriveCapacity(input: {
 
 /* ── the three chips, derived from the same three checks ─────── */
 
-type Tone = "on" | "off" | "half" | "unknown"
+export type Tone = "on" | "off" | "half" | "unknown"
 
-interface CheckView {
+export interface CheckView {
   key: string
   tone: Tone
   mark: string
   note: string
 }
 
-function checkViews(input: {
+export function checkViews(input: {
   jevConfigured: boolean
   jevCalibrated?: boolean
   agentConfigured: boolean
@@ -301,11 +294,11 @@ function checkViews(input: {
   ]
 }
 
-/* ── component ──────────────────────────────────────────────── */
+/* ── the parts the cluster renders ───────────────────────────── */
 
-const CHECK_LABEL: Record<string, string> = { gsc: "GSC", agent: "agent", jev: "Jev" }
+export const CHECK_LABEL: Record<string, string> = { gsc: "GSC", agent: "agent", jev: "Jev" }
 
-function GapRow({ gap, onOpenOnboarding, onRecheck }: {
+export function GapRow({ gap, onOpenOnboarding, onRecheck }: {
   gap: CapacityGap
   onOpenOnboarding: () => void
   onRecheck: () => void
@@ -357,105 +350,3 @@ function GapRow({ gap, onOpenOnboarding, onRecheck }: {
     </div>
   )
 }
-
-export function CapacityBadge({
-  url,
-  jevConfigured,
-  jevCalibrated,
-  agentConfigured,
-  agentModel,
-  gsc,
-  onOpenOnboarding,
-  onRecheck,
-  defaultExpanded = true,
-  children,
-}: CapacityBadgeProps) {
-  const report = deriveCapacity({ jevConfigured, agentConfigured, gsc })
-  const checks = checkViews({ jevConfigured, jevCalibrated, agentConfigured, gsc })
-  const [expanded, setExpanded] = useState(defaultExpanded)
-
-  // The badge opens itself when something new breaks, and folds itself
-  // away once everything is green. A badge that needs a click to reveal
-  // that capacity dropped is a badge that gets ignored.
-  useEffect(() => {
-    setExpanded(report.blockingCount > 0)
-  }, [report.blockingCount, report.state])
-
-  // A check in flight is genuinely unknown. A check that was never made is
-  // not the same thing: it gets the derived label, plus the advisory gap
-  // and a re-check button that says so.
-  const pending = gsc.checking
-  const rail = pending ? "checking" : report.state === "crawl" ? "crawl" : report.state
-  const label = pending ? "Checking…" : report.label
-  const missingLabel =
-    report.gaps.length === 0
-      ? "nothing missing"
-      : report.blockingCount === 0
-        ? `${report.gaps.length} optional`
-        : `${report.blockingCount} of 3 layers missing`
-
-  return (
-    <section className={`cap ${rail}`} aria-label="Run capacity">
-      <div className="cap-main">
-        <div className="cap-id">
-          <span className="cap-kicker">Capacity</span>
-          <span className="cap-state">{label}</span>
-        </div>
-
-        <div className="cap-checks">
-          {checks.map((check) => (
-            <span
-              key={check.key}
-              className={`cap-check ${check.tone}`}
-              title={`${CHECK_LABEL[check.key]}: ${check.note}`}
-            >
-              <span className="k">{CHECK_LABEL[check.key]}</span>
-              {check.mark === "" ? <span className="spin" aria-hidden /> : <span className="m" aria-hidden>{check.mark}</span>}
-              <span>{check.note}</span>
-            </span>
-          ))}
-        </div>
-
-        <p className="cap-why">{report.summary}</p>
-
-        <div className="cap-acts">
-          {report.gaps.length > 0 && (
-            <button
-              type="button"
-              className="cap-btn quiet"
-              onClick={() => setExpanded((value) => !value)}
-              aria-expanded={expanded}
-            >
-              {expanded ? "Hide" : "Fix"} · {report.gaps.length}
-            </button>
-          )}
-          {(pending || !gsc.checked) && (
-            <button type="button" className="cap-btn quiet" onClick={onRecheck}>
-              Re-check
-            </button>
-          )}
-        </div>
-      </div>
-
-      {expanded && report.gaps.length > 0 && (
-        <div className="cap-gaps">
-          {report.gaps.map((gap) => (
-            <GapRow key={gap.id} gap={gap} onOpenOnboarding={onOpenOnboarding} onRecheck={onRecheck} />
-          ))}
-        </div>
-      )}
-
-      <div className="cap-foot">
-        <span>
-          Target <b>{url || "not set"}</b>
-        </span>
-        <span>{missingLabel}</span>
-        {gsc.verified && gsc.property && <span>Property <b>{gsc.property}</b></span>}
-        {agentModel && <span>Agent <b>{agentModel}</b></span>}
-        {children}
-      </div>
-    </section>
-  )
-}
-
-export default CapacityBadge

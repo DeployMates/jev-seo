@@ -463,10 +463,16 @@
 }
 .dcol-list .dc { font-size: 11.5px; line-height: 1.4; color: var(--muted); }
 .dchipword { font: 10px/1.3 var(--mono); color: var(--hot); }
-.dcol-empty { margin: 0; font: 10.5px/1.4 var(--mono); color: var(--dim); }
+.dcol-none { display: grid; gap: 3px; }
+.dcol-none b { font: 10.5px/1.3 var(--mono); color: var(--dim); text-transform: uppercase; letter-spacing: 0.06em; }
+.dcol-none span { font-size: 11.5px; line-height: 1.45; color: var(--dim); }
 .ddiff-note { margin: 0; font-size: 11.5px; line-height: 1.5; color: var(--dim); max-width: 82ch; }
 .count.dcount { display: grid; gap: 3px; text-transform: none; letter-spacing: 0; }
+.count.dcount .dcount-hot { color: var(--hot); font-weight: 700; }
 .dcount-sub, .dcount-break { font: 10.5px/1.4 var(--mono); text-transform: uppercase; letter-spacing: 0.06em; color: var(--dim); }
 .dcount-break { color: var(--muted); }
 @media (max-width: 900px) { .ddiff-grid { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 560px) { .ddiff-grid { grid-template-columns: 1fr; } }
+.dexport[disabled] { color: var(--dim); border-color: var(--line); cursor: not-allowed; }
+.dexport[disabled]:hover { border-color: var(--line); color: var(--dim); }
+.dempty .dexport { margin-top: 9px; }

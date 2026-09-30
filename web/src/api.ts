@@ -9,6 +9,15 @@ import type {
 
 const API = import.meta.env.VITE_API ?? "http://localhost:8787"
 
+export interface ProxyStatus {
+  /** Proxies parsed from the pool file. 0 means the server egresses direct. */
+  pool: number
+  /** How many are not quarantined right now. */
+  live: number
+  /** The upstream currently in use, host only, credentials never sent. */
+  host: string | null
+}
+
 export interface ServerConfig {
   jevConfigured: boolean
   jevModel: string
@@ -18,6 +27,7 @@ export interface ServerConfig {
   agentConfigured: boolean
   agentModel: string
   gscConfigured: boolean
+  proxy?: ProxyStatus
   model: string
   defaults: { maxPages: number; concurrency: number; maxCompetitors?: number }
 }

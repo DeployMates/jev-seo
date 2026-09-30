@@ -12,6 +12,22 @@ function hostOf(url: string): string {
 }
 
 function ScoreRow({ rival }: { rival: CompetitorResult }) {
+  // The summary line is four fields. A run judges every rival on thirteen, and
+  // the ones that decide what to copy — the topics it covers, the gap it holds,
+  // the single change that would help it most — were being crawled and then
+  // dropped on the floor. A disclosure costs no state and no dependency, and it
+  // keeps the row scannable for the eight rivals that need no reading.
+  const facts: Array<{ k: string; v: string }> = []
+  if (rival.businessModel) facts.push({ k: "business model", v: rival.businessModel.replace(/_/g, " ") })
+  if (rival.proofDensity != null) facts.push({ k: "proof density", v: `${Math.round(rival.proofDensity * 100)}%` })
+  facts.push({ k: "pages crawled", v: String(rival.pages) })
+  facts.push({ k: "rule checks", v: String(rival.ruleFindings) })
+  facts.push({ k: "worth copying", v: rival.worthCopying.toFixed(2) })
+  if (rival.topFix) facts.push({ k: "biggest single fix", v: rival.topFix })
+  if (rival.aiGap) facts.push({ k: "what they have that you do not", v: rival.aiGap })
+  facts.push({ k: "judged by", v: rival.model })
+  facts.push({ k: "judgement cost", v: `${rival.ms} ms · ${rival.inputTokens} in · $${rival.costUsd.toFixed(4)}` })
+
   return (
     <div className="comp">
       <div className="g">{rival.reachable ? rival.grade : "!"}</div>
@@ -29,6 +45,31 @@ function ScoreRow({ rival }: { rival: CompetitorResult }) {
       </div>
       <div className="s">{rival.reachable ? rival.score : "–"}</div>
       <div className="copy">{rival.worthCopying >= 0.5 ? "worth copying" : ""}</div>
+
+      {rival.reachable && (
+        <details className="compfull">
+          <summary>
+            {rival.topics.length > 0 ? `${rival.topics.length} topics` : "all details"}
+          </summary>
+          {rival.topics.length > 0 && (
+            <div className="topics">
+              {rival.topics.map((topic) => (
+                <span className="topic" key={topic}>
+                  {topic}
+                </span>
+              ))}
+            </div>
+          )}
+          <dl className="compfacts">
+            {facts.map((fact) => (
+              <div className="cf" key={fact.k}>
+                <dt>{fact.k}</dt>
+                <dd>{fact.v}</dd>
+              </div>
+            ))}
+          </dl>
+        </details>
+      )}
     </div>
   )
 }

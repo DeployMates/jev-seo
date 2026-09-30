@@ -50,7 +50,12 @@ import {
   siteQuestions,
 } from "./questions.js"
 import { buildGapRow, type GapRow } from "./gap.js"
-import { buildRivalGapState, type GapPage } from "./state.js"
+import {
+  buildPageState,
+  buildRivalGapState,
+  buildSiteState,
+  type GapPage,
+} from "./state.js"
 import { extractKeywords, mergeSeedCandidates, type KeywordCandidate } from "./keywords.js"
 import {
   decisionPriority,
@@ -447,57 +452,6 @@ function gradeFrom(score: number): string {
   if (score >= 58) return "C"
   if (score >= 42) return "D"
   return "E"
-}
-
-function buildState(page: PageEvidence, context: { name: string; context: string; market: string }) {
-  return {
-    business: {
-      name: context.name || "not stated by the site owner",
-      what_they_do: context.context || "not stated by the site owner",
-      market: context.market || "not stated by the site owner",
-    },
-    site: {
-      origin: page.url,
-      // 80 page titles is enough for topical coherence without paying for more.
-      titles: [page.title].filter(Boolean),
-    },
-    page: {
-      url: page.url,
-      title: page.title,
-      description: page.description,
-      h1: page.h1,
-      headings: page.headings,
-      opening: page.opening,
-      text: page.text,
-      words: page.words,
-      internal_links: page.internalLinks,
-      external_links: page.externalLinks,
-      images: page.images,
-      has_schema_org: page.hasSchemaOrg,
-      language: page.lang,
-    },
-  }
-}
-
-function siteState(result: CrawlResult, context: { name: string; context: string; market: string }) {
-  return {
-    business: {
-      name: context.name || "not stated by the site owner",
-      what_they_do: context.context || "not stated by the site owner",
-      market: context.market || "not stated by the site owner",
-    },
-    site: {
-      origin: result.root.toString(),
-      pages: result.pages.slice(0, 20).map((p) => ({
-        path: p.path,
-        title: p.title,
-        h1: p.h1,
-        words: p.words,
-      })),
-      has_schema_org: result.pages.some((p) => p.hasSchemaOrg),
-      https: result.root.protocol === "https:",
-    },
-  }
 }
 
 /** Shortlist cannibalization candidates by title/H1 word overlap, in code. */
@@ -1015,15 +969,31 @@ async function judgeCompetitor(
     inputTokens: 0,
   }
 
+  let result: Awaited<ReturnType<typeof crawl>>
   try {
-    const result = await crawl(url, { maxPages: Math.min(maxPages, 8), maxDepth: 2, budgetMs: 45_000 })
-    if (result.pages.length === 0) {
-      return { url, reachable: false, error: "No pages could be fetched.", ...empty }
-    }
+    result = await crawl(url, { maxPages: Math.min(maxPages, 8), maxDepth: 2, budgetMs: 45_000 })
+  } catch (error) {
+    return { url, reachable: false, error: `Could not be crawled: ${(error as Error).message}`, ...empty }
+  }
 
-    const rules = runRules(result.pages, result.root.toString())
-    const stats = ruleStats(result.pages)
+  if (result.pages.length === 0) {
+    return { url, reachable: false, error: "No pages could be fetched.", ...empty }
+  }
 
+  const rules = runRules(result.pages, result.root.toString())
+  const stats = ruleStats(result.pages)
+
+  // Past this point the rival has been fetched, so it IS reachable whatever the
+  // judge does. Folding the two into one try made a Zen outage report every
+  // rival as unreachable, which is the opposite of what happened.
+  const crawled = {
+    url: result.root.toString(),
+    pages: result.pages.length,
+    topics: result.pages.slice(0, 12).map((p) => p.title).filter(Boolean),
+    ruleFindings: rules.length,
+  }
+
+  try {
     const state = {
       business: {
         name: context.name || "not stated",
@@ -1072,10 +1042,10 @@ async function judgeCompetitor(
     }
   } catch (error) {
     return {
-      url,
-      reachable: false,
-      error: (error as Error).message,
       ...empty,
+      ...crawled,
+      reachable: true,
+      error: `Crawled ${crawled.pages} pages, but the judge failed: ${(error as Error).message}`,
     }
   }
 }
@@ -1210,7 +1180,11 @@ export async function runAudit(request: AuditRequest, emit: (event: AuditEvent) 
     // Site-level judgement: one call over the whole crawled set.
     emit({ type: "stage", stage: "Jev", detail: "Asking site-level questions" })
     try {
-      const siteResult = await systemOne(siteState(crawlResult, context), siteQuestions(), { model })
+      const siteResult = await systemOne(
+        buildSiteState(crawlResult, context, siteQuestions()).state,
+        siteQuestions(),
+        { model },
+      )
       siteJudgements = siteResult.answers as unknown as Record<string, unknown>
       questionsAsked += Object.keys(siteQuestions()).length
       judgementCount += 1
@@ -1226,7 +1200,11 @@ export async function runAudit(request: AuditRequest, emit: (event: AuditEvent) 
         })
       }
 
-      const geoResult = await systemOne(siteState(crawlResult, context), GEO_QUESTIONS, { model })
+      const geoResult = await systemOne(
+        buildSiteState(crawlResult, context, GEO_QUESTIONS).state,
+        GEO_QUESTIONS,
+        { model },
+      )
       siteJudgements = { ...(siteJudgements ?? {}), ...geoResult.answers }
       questionsAsked += Object.keys(GEO_QUESTIONS).length
       judgementCount += 1
@@ -1260,7 +1238,11 @@ export async function runAudit(request: AuditRequest, emit: (event: AuditEvent) 
           ...REFRESH_QUESTIONS,
         }
         try {
-          const result = await systemOne(buildState(page, context), questions, { model })
+          const result = await systemOne(
+            buildPageState(page, crawlResult.pages, crawlResult.graph, context, questions).state,
+            questions,
+            { model },
+          )
           const levelCounts: Record<string, { levels: number }> = {}
           for (const [id, primitive] of Object.entries(questions)) {
             if (primitive.type === "score") levelCounts[id] = { levels: primitive.criteria.length }
@@ -1634,7 +1616,11 @@ export async function runAudit(request: AuditRequest, emit: (event: AuditEvent) 
     generatedAt: new Date().toISOString(),
     score,
     grade: gradeFrom(score),
-    model,
+    // `runJev:false` scores from the rule pass alone, so recording a Jev model
+    // here put `jev-1.13-free` on a run no Jev answered — and the history diff
+    // then compared a rules-only score against a judged one as if both were
+    // the same measurement.
+    model: runJev ? model : "none (rules only)",
     pagesCrawled: crawlResult.pages.length,
     pagesJudged: judgedPages.length,
     openPages: 0,

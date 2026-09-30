@@ -168,80 +168,90 @@ This is the same trap as the `inbound` floor in `UX-VALUE.md`: absence from a bo
 absence from what the crawl reached, not absence from the site. Getting it wrong here is worse,
 because a wrongly-closed page is one a practitioner stops doing work on.
 
-### The five states
+### The six states
 
-A decision, not four. The brief's `regressed` is not a peer of `new` — a page that is newly raised
-and was reachable in both runs **is** a regression, and the two must not share a label.
-
-| condition | chip | why it is this and not the other word |
+| condition | enum | renders as |
 | --- | --- | --- |
-| in both, same `topChange.key` | `still open` | nothing about it moved |
-| in both, different `topChange.key` | `changed` | the judge picked a different edit |
-| earlier only, reachable in both | `no longer raised` | not `fixed` — a run not raising it is not a site being fixed |
-| this run only, reachable in both | `regressed` | the page was judged before and is worse now |
-| this run only, not reachable earlier | `newly raised` | coverage, not a finding about the site |
-| either run missed the page | `not comparable` | never `fixed` |
+| both reachable, raised in both, same `topChangeKey` | `still_open` | still open |
+| both reachable, raised in both, different `topChangeKey` | `changed` | changed |
+| raised before only, both reachable | `not_longer_raised` | no longer raised |
+| raised now only, both reachable | `regressed` | regressed |
+| raised now, never reachable before | `newly_raised` | newly raised |
+| raised before, not reachable now | `not_comparable` | not comparable |
 
-`changed` is a fifth state the brief did not ask for, and shipping without it forces `still open`
-to cover two situations that are not the same. The reader's action differs: one is "leave it", the
-other is "read the new instruction".
+`regressed` is not a peer of `newly raised`. A page reachable in both runs that goes from silent to
+raising is a regression; a page this run reached for the first time is not. Same shape, opposite
+reading, so they cannot share a chip.
 
 ### The wire shape, AS SHIPPED
 
-`server/src/history.ts` is gilfoyle's and this is its real shape, not a proposal. `GET /api/history`
-returns the run list; `RunDelta` carries the buckets.
+`server/src/history.ts`, gilfoyle's file. This is verified against the code, not proposed.
+
+```
+DeltaState = "still_open" | "changed" | "not_longer_raised"
+           | "regressed" | "newly_raised" | "not_comparable" | "clean"
+```
+
+```
+PageDelta {
+  path, url, state,
+  comparable: boolean,          // false wherever state is not_comparable
+  raisedNow: boolean, raisedBefore: boolean,
+  topChangeKey: string | null,  // the key alone, never the prose
+  topChange: string | null,     // the prose instruction, for the row to show
+  bandNow: PageBandWord | null, // decisive | to verify | needs a human
+  bandBefore: PageBandWord | null
+}
+```
+
+There is no `openNow` / `openBefore` on `PageDelta`. Both fields are named `raised*`, which matters
+at exactly one place: branching the `regressed` body line. `raisedBefore` is the discriminator, not
+the open/closed pair, because cause two is a page that was **raised and judged without raising
+anything** — reachable, in the payload, but not raised.
 
 ```
 RunDelta {
   baseline: null | { generatedAt, score, openPages },
-  scoreDelta: number | null,
-  fixed: PageDelta[], stillOpen: PageDelta[],
-  new: PageDelta[], regressed: PageDelta[],
-  offCrawl: PageDelta[], clean: number,
+  stillOpen: PageDelta[], changed: PageDelta[], notLongerRaised: PageDelta[],
+  regressed: PageDelta[], newlyRaised: PageDelta[], notComparable: PageDelta[],
+  clean: number, unreachableBefore: number,
   pagesCrawledNow: number, pagesCrawledBefore: number
 }
 ```
 
-```
-PageDelta { path, url, state, openNow, openBefore, topChange }
-```
+`HistoryPage` carries `reachable`, and that is the only reachability source. `baseline.openPages` is
+kept, and it is the earlier run's count of pages that raised a change.
 
-`DeltaState` is `fixed | still_open | new | regressed | off_crawl`.
+Three things in that shape are load-bearing for the copy:
 
-### Two states in this file the payload cannot produce
+- **`comparable`** is carried on every row and is false wherever the state is `not_comparable`. It is
+  what separates `regressed` from `newly raised`, and those two have opposite reader actions.
+- **`topChangeKey`** is the key alone. `changed` is decidable because the key is compared, and the
+  prose instruction is carried beside it for the row to show.
+- **`bandNow` / `bandBefore`** use the three band words already in `02 do this now`, not
+  `act`/`review`/`escalate`. The wire enum is internal; these three are the only ones that reach the
+  screen, and they are the ones the delta copy interpolates.
 
-Stated plainly so nobody ships copy the panel can never show.
+### `notComparable` is not optional
 
-| state | why it is blocked | ship as |
-| --- | --- | --- |
-| `changed` | `PageDelta` carries one `topChange`, and the delta tracks an `open` boolean, not instructions | `still open` |
-| `regressed` via band move | the payload has no `bandFrom`/`bandTo`; bands are never compared between runs | omit |
+`notComparable` is a bucket for a page the earlier run raised and this run could **not reach**. It
+is the only reason `no longer raised` is safe to believe: a page that left the crawl must never
+appear as closed.
 
-`changed` degrades safely, because `still open` is true and the row still points at the current
-instruction. The band-move case has no safe degradation — it would be a real regression reported as
-nothing. If gilfoyle adds it, the strings are already written above and need only a bucket.
+**Rendering it is a correctness requirement, not a nicety.** Dropped, a page that silently fell out
+of the crawl disappears, and it can disappear while the nothing-moved state reads as healthy. That is
+the one path where this feature states something false.
 
-### `not comparable` comes from `offCrawl`, and it is not optional
+A shrunken-crawl caveat is not a substitute. It fires on `pagesCrawledNow < pagesCrawledBefore`, so a
+page can leave while the total holds steady or grows and the caveat stays silent.
 
-`offCrawl` is the bucket for a page that was raised in the earlier run and **was not crawled this
-time**. It is the only reason `no longer raised` is safe to believe: a page that left the crawl must
-never appear as closed.
+Hard rule: when `notComparable.length > 0`, the nothing-moved state may not render.
 
-**Rendering `offCrawl` is a correctness requirement, not a nicety.** Dropped, it makes a page that
-silently fell out of the crawl disappear, and it can do so while the nothing-moved empty state reads
-as healthy. That is the one path where this feature states something false.
+`offCrawl` supplies `not comparable`, so reachability is carried without a `comparable` boolean. The
+`fixed` enum value is fine as a wire key — it must never reach the screen, which is what the
+`COLUMN_WORD` map in `RunDiff.tsx` is for.
 
-The caveat line that covers a shrunken crawl is not a substitute. It fires on `pagesCrawledNow <
-pagesCrawledBefore`, so a page can leave the crawl while the total holds steady or grows, and the
-caveat stays silent.
-
-Per-column, the same requirement: when `offCrawl.length > 0`, the nothing-moved state may not render.
-
-`comparable` is the field that cannot be reconstructed downstream. It is what separates
-`regressed` from `newly_raised`, and those two have opposite reader actions. If the payload ships
-`state` without it, the distinction is gone and the UI will have to guess.
-
-`startedAt` must be the run's own wall clock, because it is what the `compare to` control and the
+`baseline.generatedAt` is the run's own wall clock, and it is what the `compare to` control and the
 `change since 14 Sep` header both render. It is countable, so it is allowed on screen.
 
 ### Every chip must survive being wrong
@@ -253,6 +263,79 @@ wording asserts something about the **site**, it is asserting something this fea
 So every chip names the **runs**, never the site. That is why `no longer raised` exists instead of
 `fixed`, and why the regression chip says which run is the worse one rather than that anything got
 worse.
+
+### Chip: the enum renders, not a prose sentence
+
+The chip on the card is the **mapped enum**, not a sentence:
+
+```
+still_open
+changed
+not_longer_raised
+regressed
+newly_raised
+not_comparable
+```
+
+An enum does not change meaning when the copy around it is revised, and a prose chip has to be found
+and edited in every place it appears. That is the same reason every chip here names the runs: a
+display string should not encode an assertion a later revision would falsify.
+
+The framing a bare enum loses — that a regression is a statement about the two runs, not the site —
+moves to the **standing note** under the column, once, instead of into six row sentences.
+
+### Where the enum maps to prose, and why it is not on the server
+
+The mapping lives in the web, keyed by enum. That is the architecture this repo already uses:
+`web/AGENTS.md:52` forbids a raw id reaching the screen and `decisionCopy.ts` maps ids to prose, so
+the server owns keys and the web owns words. A `deltaChip` field on the server would invert that
+split for one feature and leave two conventions in the codebase.
+
+Drift is the real concern behind putting it on the server, and the repo already has the answer: the
+`FALSIFIER` invariant in `UX-VALUE.md` checks server id, web label and doc table against each other.
+The same three-file check covers these six states.
+
+**An enum with no mapping renders nothing.** Never the raw value, never a blank chip. Unknown keys
+are the signal that the three files have drifted.
+
+```bash
+python3 - <<'PY'
+import re, sys
+hist = open('server/src/history.ts').read()
+web  = open('web/src/RunDiff.tsx').read()
+doc  = open('docs/UX-DIFF.md').read()
+
+block = re.search(r'export type DeltaState =(.*?)(?:\nexport |\Z)', hist, re.S)
+states = set(re.findall(r'"([a-z_]+)"', block.group(1))) if block else set()
+if not states:
+    print("GUARD BROKEN: DeltaState not found in server/src/history.ts")
+
+col = re.search(r'const COLUMN_WORD[^=]*= \{(.*?)\n\}', web, re.S)
+mapped = set(re.findall(r'^\s+([a-z_]+):', col.group(1), re.M)) if col else set()
+if not mapped:
+    print("GUARD BROKEN: COLUMN_WORD not found in web/src/RunDiff.tsx")
+
+tabled = set(re.findall(r'^\| [^|]+\|\s*`([a-z_]+)`\s*\|', doc, re.M))
+if not tabled:
+    print("GUARD BROKEN: no enum column found in docs/UX-DIFF.md")
+
+# A detection that cannot find its input is itself a failure, but it must not
+# share the flag the findings use, or the findings get erased.
+broken = not (states and mapped and tabled)
+bad = broken
+for x in sorted(mapped - states):
+    print(f"STALE KEY: web maps {x}, server cannot emit it"); bad = True
+for x in sorted(states - mapped - {"clean"}):
+    print(f"UNMAPPED: server can emit {x}, web has no label"); bad = True
+for x in sorted(states - tabled - {"clean"}):
+    print(f"UNDOCUMENTED: server has {x}, this file does not tabulate it"); bad = True
+print("DELTA INVARIANT:", "FAIL" if bad else "PASS")
+sys.exit(1 if bad else 0)
+PY
+```
+
+`clean` is a count, not a chip, so it is excluded from the mapping and the table. If it ever becomes
+a chip, both exclusions must go.
 
 ### The cells, verbatim
 
@@ -314,14 +397,35 @@ not comparable
 One of the two runs did not crawl this page, so there is nothing to compare.
 ```
 
-**A band that moved against you on a page that was already raised is also `regressed`.**
-`decisive` to `to verify`, `decisive` to `needs a human`, `to verify` to `needs a human`, and a
-page that moved out of `05 not decided` into `02 do this now`. The cell names the move:
+**`regressed` has two causes, and the body line is per-cause.** The chip is the same for both, and
+that is deliberate — splitting it would make seven columns and split attention on the row that
+matters most. What distinguishes them is that one of them presupposes a prior state and the other
+does not: on a page that went from silent to raising, the reader was never handed that page, so
+`regressed` on its own overstates what there was to regress from.
+
+The chip survives both because its claim is true of both: before the run it was silent, now an edit
+is raised, and this run does treat the page worse than the one before. The body carries the cause.
+
+**Cause one — a band that moved against a page already raised.** `decisive` to `to verify`,
+`decisive` to `needs a human`, `to verify` to `needs a human`, and a page that moved out of
+`05 not decided` into `02 do this now`. Here `raisedBefore` is `true`, so there is a prior state.
 
 ```
 regressed — this run treats the page worse than the one before
-The change is the same, but the band moved {from} to {to}.
+The change is the same, but the band moved {bandBefore} to {bandNow}.
 ```
+
+**Cause two — a page that was reachable and judged without raising anything, and now raises
+something.** Here `raisedBefore` is `false`. Not a seventh column: same chip, different body, because
+the reader's action differs — this one is a page they were never handed.
+
+```
+regressed — this run treats the page worse than the one before
+Both runs judged this page. The earlier one raised nothing on it, and this one does.
+```
+
+`{bandBefore}` and `{bandNow}` are `PageBandWord`, already the three screen words, so no mapping is
+needed. A `null` on either side means the page was not raised in that run, which is cause two.
 
 ### The standing note
 
@@ -337,15 +441,23 @@ Pages one run did not reach are marked not comparable, never as closed.
 
 ### Count chip
 
-Two lines in the `02` half head. **Every count reads `X of Y` plus a line naming what Y is** — a bare
-breakdown gives the reader no denominator and no idea what it is a share of.
+**Every count reads `X of Y` plus a line naming what Y is.** A bare breakdown gives the reader no
+denominator and no idea what it is a share of.
+
+The denominator is `stillOpen.length + notLongerRaised.length` — the pages the earlier run raised a
+change on that this run could also reach. Every numerator counted against it is a subset of that set,
+so the ratio is bounded and cannot exceed 100%.
+
+It deliberately is **not** `baseline.openPages`. That count includes pages this run could not reach,
+so a ratio over it can exceed 100%: `newly_raised` was never raised before at all, and part of
+`regressed` went from silent to raising, so neither sits inside `openPages`.
 
 ```
-{k} of {comparable} pages moved between these two runs
+{n} of {stillOpen + notLongerRaised} pages the earlier run raised are no longer raised
 ```
 
 ```
-{comparable} pages appeared in both runs, which is what can be compared
+{stillOpen + notLongerRaised} pages the earlier run raised a change on, and this run could reach
 ```
 
 Then the breakdown, regressed leading, because that is the row needing a decision today:
@@ -354,8 +466,72 @@ Then the breakdown, regressed leading, because that is the row needing a decisio
 {k} regressed · {n} no longer raised · {j} newly raised · {i} still open
 ```
 
+**When `regressed.length > 0`, a hot line sits above the closure headline.** That headline counts
+only closures, so on its own it reads as a success rate, which is the one misreading this whole
+column exists to prevent. The regression count goes first and is never the second line:
+
+```
+{k} pages regressed since 14 Sep — take these first
+```
+
+**Do not label `baseline.openPages` as "pages appeared in both runs".** That is a different number.
+A page can be in both runs and clean, and it is not counted in `openPages`, so the label would
+understate the comparable set by however many pages are clean.
+
 With no comparison active the chip is unchanged from today. It never renders all zeros, and it never
-renders a bare breakdown without the `{comparable}` denominator above it.
+renders a bare breakdown without the denominator line above it.
+
+### Per-column empty states
+
+Six columns, six different causes. `nothing in this column` is banned: it is one generic line for six
+unrelated situations, which is exactly what the voice rules forbid.
+
+**Regressed.** The body has to cover both causes of a regression — a band that worsened, and a page
+that went from silent to raising. A body that only mentions bands is false for the second.
+
+```
+no page got worse between these two runs
+Nothing went from decided to undecided, and no page that was silent is now raising.
+```
+
+**No longer raised.**
+
+```
+nothing closed since the last run
+Every page the earlier run raised is still on the list.
+```
+
+**Newly raised.**
+
+```
+no page arrived that the last run did not reach
+Every page on this list was already in the earlier run's crawl.
+```
+
+**Changed.**
+
+```
+every page both runs raised still carries the same change
+```
+
+**Still open.** The complement of `changed`: if this column is empty, every page both runs raised now
+carries a different change.
+
+```
+every page both runs raised now carries a different change
+```
+
+**Not comparable.** Never say a page here was reached. This column holds the ones that were not.
+
+```
+no page raised earlier went out of reach this run
+```
+
+Then, once, under the grid rather than in the column:
+
+```
+A column is empty because that case did not occur, not because it was skipped.
+```
 
 ---
 

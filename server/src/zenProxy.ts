@@ -28,9 +28,16 @@ function loadPool(): void {
       .filter(Boolean)
     pool = lines
       .map((line) => {
-        const [host, port, user, pass] = line.split(":")
-        if (!host || !port || !user || !pass) return null
-        return { url: `http://${user}:${pass}@${host}:${port}`, host, blockedUntil: 0 }
+        // `host:port:user:pass` (Webshare) or bare `host:port` (public free
+        // proxies carry no credentials). A free pool with no auth is the whole
+        // point when the paid one is out of bandwidth — rejecting it silently
+        // left the pool empty and every request fell through to direct, which
+        // is how a working proxy ends up looking like a dead one.
+        const parts = line.split(":")
+        const [host, port, user, pass] = parts
+        if (!host || !port) return null
+        const auth = user && pass ? `${user}:${pass}@` : ""
+        return { url: `http://${auth}${host}:${port}`, host, blockedUntil: 0 }
       })
       .filter((u): u is Upstream => u !== null)
     loaded = true

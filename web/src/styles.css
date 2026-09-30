@@ -226,6 +226,32 @@ button.ghost {
   display: grid; grid-template-columns: 34px 1fr 60px 78px; gap: 11px; align-items: center;
   padding: 10px 14px; border-bottom: 1px solid var(--line);
 }
+/* The disclosure spans the whole row so the summary sits under the score
+   columns rather than fighting them for the 1fr. */
+.comp:has(.compfull) { grid-template-areas: "g d s copy" ". full full full"; }
+.comp:has(.compfull) > .g { grid-area: g; }
+.comp:has(.compfull) > .d { grid-area: d; }
+.comp:has(.compfull) > .s { grid-area: s; }
+.comp:has(.compfull) > .copy { grid-area: copy; }
+.compfull { grid-area: full; margin-top: 8px; }
+.compfull > summary {
+  cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 5px;
+  font: 10.5px/1 var(--mono); color: var(--dim); padding: 3px 6px;
+  border: 1px solid var(--line); border-radius: 2px;
+}
+.compfull > summary::-webkit-details-marker { display: none; }
+.compfull > summary::before { content: "▸"; font-size: 9px; }
+.compfull[open] > summary::before { content: "▾"; }
+.compfull > summary:hover { color: var(--ink); border-color: var(--ink); }
+.compfull .topics { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0 6px; }
+.compfull .topic {
+  font: 10.5px/1 var(--mono); color: var(--muted);
+  border: 1px solid var(--line); border-radius: 2px; padding: 3px 6px;
+}
+.compfacts { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 3px 16px; margin: 0; }
+.compfacts .cf { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
+.compfacts dt { font: 10px/1.5 var(--mono); color: var(--dim); white-space: nowrap; }
+.compfacts dd { margin: 0; font: 11px/1.5 var(--mono); color: var(--ink); min-width: 0; }
 .comp:last-child { border-bottom: 0; }
 .comp .g { font: 700 19px/1 var(--mono); text-align: center; }
 .comp .g.A, .comp .g.B { color: var(--ok); }

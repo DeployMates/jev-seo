@@ -124,13 +124,28 @@ export interface RunDelta {
   baseline: null | { generatedAt: string; score: number; openPages: number }
   /** Context only. Never a finding — see the file header. */
   scoreDelta: number | null
+  /** Both runs judged by the same model. False withholds `scoreDelta`. */
+  judgedBothRuns: boolean
   stillOpen: PageDelta[]
   changed: PageDelta[]
   notLongerRaised: PageDelta[]
   regressed: PageDelta[]
   newlyRaised: PageDelta[]
   notComparable: PageDelta[]
-  /** Reachable in both, raised in neither. Counted, never listed. */
+  /**
+   * Pages both runs could speak about: crawled AND judged in each. This is the
+   * only honest denominator for "how much moved", and it is a different number
+   * from `baseline.openPages`, which counts what the earlier run *raised*.
+   *
+   * It has to be its own field because the two leak. A page that was reachable
+   * and silent before and is raised now is a regression and is not in
+   * `openPages`. A page raised now that the earlier run never saw is
+   * `newly_raised` and is not in `openPages` either. So a numerator summed over
+   * the moved buckets is not a subset of `openPages` and can exceed it, and
+   * dividing one by the other produces a chip that reads over 100%.
+   */
+  comparableCount: number
+  /** Reachable in both, raised in neither, plus pages discovered and not raised. */
   clean: number
   /** Reachable in both, reachable in neither, raised in neither. */
   unreachableBefore: number
@@ -199,12 +214,14 @@ export function emptyDelta(): RunDelta {
   return {
     baseline: null,
     scoreDelta: null,
+    judgedBothRuns: false,
     stillOpen: [],
     changed: [],
     notLongerRaised: [],
     regressed: [],
     newlyRaised: [],
     notComparable: [],
+    comparableCount: 0,
     clean: 0,
     unreachableBefore: 0,
     pagesCrawledNow: 0,
@@ -253,7 +270,19 @@ export function diffRuns(current: HistoryRun, previous: HistoryRun | null): RunD
     score: previous.score,
     openPages: previous.openPages,
   }
-  delta.scoreDelta = Number((current.score - previous.score).toFixed(2))
+
+  // A score only means something if the same judge produced both. A run with the
+  // judge off scores from deterministic rules alone, and a local-judge run scores
+  // from an uncalibrated fallback, so subtracting either from a calibrated Zen run
+  // produced a confident number describing nothing — a real run showed
+  // `scoreDelta: 96` purely because the earlier run had been switched off. The
+  // baseline is still shown; the difference is not invented.
+  const currentJudged = current.pagesJudged > 0
+  const previousJudged = previous.pagesJudged > 0
+  delta.judgedBothRuns = currentJudged && previousJudged && current.model === previous.model
+  if (delta.judgedBothRuns) {
+    delta.scoreDelta = Number((current.score - previous.score).toFixed(2))
+  }
   delta.pagesCrawledBefore = previous.pages.length
 
   const before = new Map(previous.pages.map((page) => [page.path, page]))
@@ -283,6 +312,7 @@ export function diffRuns(current: HistoryRun, previous: HistoryRun | null): RunD
     }
 
     const comparable = true
+    delta.comparableCount += 1
     if (!page.raised) {
       if (prior.raised) delta.notLongerRaised.push(row(page, prior, "not_longer_raised", comparable))
       else delta.clean += 1

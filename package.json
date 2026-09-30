@@ -15,6 +15,17 @@
   "bin": {
     "jev-seo": "bin/jev-seo.js"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DeployMates/jev-seo.git"
+  },
+  "bugs": {
+    "url": "https://github.com/DeployMates/jev-seo/issues"
+  },
+  "homepage": "https://github.com/DeployMates/jev-seo#readme",
+  "author": {
+    "name": "Wael Bousfira"
+  },
   "workspaces": [
     "server",
     "web"

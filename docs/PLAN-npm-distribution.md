@@ -146,7 +146,7 @@ Then `server/package.json` scripts become:
 
 `JEV_REPO_ROOT` is removed. If a dev escape hatch is genuinely needed it is `JEV_DATA_DIR`, which is honest about what it does.
 
-`agent.ts` gets one extra consequence: opencode resolves `.mcp.json` from the project directory it runs in, so the generated workspace needs its own `.mcp.json` (see §1.8).
+`agent.ts` gets one extra consequence: opencode resolves `.mcp.json` from the project directory it runs in, so the generated workspace needs its own `.mcp.json` (see §1.8). It also needs its own `opencode.json`: `agent.ts` sets `OPENCODE_CONFIG_DIR` to that workspace on every spawn, which is what stops the child resolving the operator's global config. The permission block in it is rewritten per run by `writeAgentPermissions`, because the one allowed write target is an absolute path chosen at call time.
 
 ### 1.5 The app writes into its own install directory
 
@@ -175,7 +175,7 @@ Rule to hold across the codebase: **the install directory is read-only.** If a f
 
 ### 1.8 The Python MCP is in the runtime path it should not be in
 
-**Now:** `server/mcp/gsc-mcp` is a vendored Python FastMCP server, launched by `server/mcp/gsc-mcp/run.sh` via `uv run` with `mcp[cli]<2` plus six Google client libraries, requiring Python 3.11+. It is registered in `.mcp.json` as server `gsc`. Its only consumer is the `opencode` child process that `agent.ts` spawns for `/api/research` — so that the agent can call GSC tools.
+**Now:** `server/mcp/gsc-mcp` is a vendored Python FastMCP server, launched by `server/mcp/gsc-mcp/run.sh` via `uv run` with `mcp[cli]<2` plus six Google client libraries, requiring Python 3.11+. It is registered as server `gsc` in the **generated** `<dataDir>/agent/.mcp.json` (the repo-root `.mcp.json` is the dev-from-checkout path only — its `run.sh` argument is relative and cannot resolve from the generated workspace). Its only consumer is the `opencode` child process that `agent.ts` spawns for `/api/research` — so that the agent can call GSC tools.
 
 **The finding that makes this tractable:** the audit path needs **zero** Python. `gsc.ts` mints its own RS256 JWT with `node:crypto` and talks to the Google REST endpoints directly — that is a deliberate design choice already documented in the module header, "no Google client library, nothing to install for an onboarding check to pass". No file in `server/src` imports or shells out to Python.
 

@@ -28,4 +28,5 @@ __pycache__/
 
 # proxies.txt — local only, never commit
 proxies.txt
+proxies-free.txt
 .vercel

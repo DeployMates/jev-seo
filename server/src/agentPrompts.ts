@@ -146,13 +146,25 @@ const SHARED_RULES = `## Rules you cannot break
     \`[]\`. An empty list is a small truthful answer; an invented one is a lie
     that a human has to catch.`
 
+/**
+ * Keyed by the `ToolId` this project grants, but the text must name the tool the
+ * model can actually call. `open-websearch` is both a grant identity (matched
+ * against the transcript by `NAME_PATTERNS`, `agent.ts:115`) and a real MCP server
+ * name, so its tools reach the model namespaced — `open-websearch_search`,
+ * `open-websearch_fetchWebContent`. A prompt advertising only the bare label
+ * teaches the model to cite a name no transcript can contain, which fails the
+ * sourcing gate on every run.
+ */
 const TOOL_DESCRIPTIONS: Record<ToolId, string> = {
   gsc: `\`gsc\` — first-party Search Console data for this exact site: queries,
    pages, impressions, clicks, CTR, average position, indexing status. This is
-   the only source of truth about how *this site* actually performs.`,
-  "open-websearch": `\`open-websearch\` — public web search. Use it to see what is
-   visible in results, and to find candidate competitors. A search result is
-   evidence that a page is *visible*, never evidence of its traffic.`,
+   the only source of truth about how *this site* actually performs. Cite its
+   tools by their full namespaced name, e.g. \`gsc_search_analytics\`.`,
+  "open-websearch": `\`open-websearch_search\` — public web search. Use it to see
+   what is visible in results, and to find candidate competitors. A search result
+   is evidence that a page is *visible*, never evidence of its traffic.
+   \`open-websearch_fetchWebContent\` fetches one page's text. Cite whichever you
+   actually called, by its full namespaced name.`,
   "undetected-browser": `\`undetected-browser\` — a real browser for pages that
    search cannot read. Slower and more expensive; use it only when a search
    result genuinely cannot answer the question.`,

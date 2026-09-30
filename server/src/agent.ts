@@ -1,11 +1,19 @@
 /**
- * The research agent: one `opencode run` process, one strict JSON blob back.
+ * The research agent: one opencode session through the SDK, one strict JSON blob
+ * back.
  *
- * Why a subprocess and not an HTTP call. Jev is a decision model and cannot
- * hold a session or call a tool. This layer needs both, and the local opencode
- * runtime is the thing that already has them. It is spawned as a child process
- * rather than driven in-process so a wedged or crashing agent cannot take the
- * audit server down with it, and so a run has a hard wall-clock ceiling.
+ * Why the SDK and not a raw `opencode run` subprocess. Jev is a decision model
+ * and cannot hold a session or call a tool; this layer needs both. The SDK hands
+ * the permission block and the MCP server list over as values, so a grant is
+ * explicit in the call rather than inferred from which files a child happens to
+ * resolve — which is what made a credential-less proxy or a stale config file a
+ * silent, undiagnosable failure.
+ *
+ * What the SDK costs: the run is no longer isolated in a child process, so a
+ * wedged agent shares a fate with the audit server. That is contained, not
+ * ignored — the session is aborted on a signal, the server is closed in a
+ * `finally`, the wall-clock ceiling still applies, and a research failure was
+ * already a supported degraded result rather than a throw.
  *
  * The shape of the guarantee, which matters more than the model choice:
  *
@@ -19,10 +27,9 @@
  * - **Every number is traceable to a tool call that happened.** A figure
  *   naming a tool that never ran is a validation failure, not a caveat.
  */
-import { spawn } from "node:child_process"
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs"
 import { isAbsolute, resolve } from "node:path"
-import { agentWorkspaceDir, researchDir } from "./paths.js"
+import { agentWorkspaceDir, researchDir, agentMcpServers, agentPermission, writeAgentPermissions } from "./paths.js"
 import {
   CRAWL_ONLY_OUTPUT,
   ResearchOutputSchema,
@@ -71,7 +78,13 @@ const AGENT_MODEL = process.env.AGENT_MODEL ?? "opencode/space-bunny-free"
 const AGENT_BIN = process.env.AGENT_BIN ?? "opencode"
 
 /** Deep research is slow by nature. The plan makes it an explicit button. */
-const AGENT_TIMEOUT_MS = Number(process.env.AGENT_TIMEOUT_MS ?? 240_000)
+/**
+ * Deep research is slow by nature — a real run makes ~45 tool calls (search plus
+ * page fetches), which does not fit in four minutes. The ceiling exists to stop a
+ * wedged run, not to bound a working one, so it is set well above a healthy run
+ * and stays overridable.
+ */
+const AGENT_TIMEOUT_MS = Number(process.env.AGENT_TIMEOUT_MS ?? 600_000)
 
 /** NDJSON transcript cap. A research run is chatty; 12 MiB is far past sane. */
 const MAX_TRANSCRIPT_CHARS = 12 * 1024 * 1024
@@ -131,6 +144,43 @@ const PERMITTED_BUILTINS = new Set(["read", "grep", "glob", "list", "todowrite",
  * surface the untrusted-content rule exists to close.
  */
 const WRITE_BUILTINS = new Set(["write", "edit", "patch", "multiedit"])
+
+/**
+ * MCP tools that change the audited site, refused on every run regardless of
+ * the grant.
+ *
+ * Two independent layers, deliberately. The vendored `gsc` registry no longer
+ * exposes these at all, so the model cannot see them; this list is what stops
+ * one being added back and reaching a `siteOwner` service account. The research
+ * prompt is built from crawled page text on a site the operator does not
+ * control, so text on that page can read as an instruction — and the
+ * `UNTRUSTED` clause in `questions.ts` guards the judge layer, not this one.
+ * Nothing jev-seo asks the agent to do requires writing, so there is no cost to
+ * refusing.
+ *
+ * Matched on the bare tool name. The transcript reports namespaced names
+ * (`gsc_sitemaps_delete`), so the check strips the server prefix too.
+ */
+const FORBIDDEN_AGENT_TOOLS = new Set([
+  "submit_url",
+  "submit_batch",
+  "indexnow_submit",
+  "submit_sitemap",
+  "submit_sitemap_urls",
+  "sitemaps_delete",
+  "force_reindex",
+])
+
+/**
+ * Every name a transcript tool could be called by: itself, and itself with the
+ * server namespace stripped. opencode reports `gsc_sitemaps_delete`, the registry
+ * knows it as `sitemaps_delete`, and a denylist has to catch both.
+ */
+function toolNameCandidates(name: string): string[] {
+  const lower = name.trim().toLowerCase()
+  const cut = lower.indexOf("_")
+  return cut === -1 ? [lower] : [lower, lower.slice(cut + 1)]
+}
 
 function writtenPath(input: unknown): string | null {
   if (!input || typeof input !== "object") return null
@@ -408,6 +458,16 @@ function validateRun(
 
   // Gate 2 — nothing outside the grant ran.
   for (const call of transcript.toolCalls) {
+    if (toolNameCandidates(call.tool).some((n) => FORBIDDEN_AGENT_TOOLS.has(n))) {
+      return {
+        ok: false,
+        violation: {
+          reason: "ungranted-tool",
+          detail: `The agent called "${call.tool}", which writes to the audited site. A research run only reads; the product never asks the agent to change anything.`,
+        },
+        flagged,
+      }
+    }
     if (isPermittedBuiltin(call.tool, call, writablePaths)) continue
     if (resolveToolId(call.tool, allowlist) === null) {
       return {
@@ -509,6 +569,18 @@ export function activeAgentModel(): string {
   return AGENT_MODEL
 }
 
+/**
+ * `AGENT_MODEL` is the `provider/model` string the CLI takes; the SDK wants the
+ * two halves separately. Split on the first `/` only, so a model id containing
+ * one is not cut in half — a silently truncated model id resolves to nothing and
+ * the run degrades for a reason that never appears in the log.
+ */
+function modelRef(): { providerID: string; modelID: string } {
+  const at = AGENT_MODEL.indexOf("/")
+  if (at < 0) return { providerID: "opencode", modelID: AGENT_MODEL }
+  return { providerID: AGENT_MODEL.slice(0, at), modelID: AGENT_MODEL.slice(at + 1) }
+}
+
 class RunFailure extends Error {
   constructor(readonly reason: DegradeReason, message: string) {
     super(message)
@@ -524,115 +596,186 @@ export interface AgentEvent {
   attempt?: number
 }
 
-function runOpencode(
+/**
+ * Run one prompt through the opencode SDK, in-process.
+ *
+ * The SDK hands the permission and MCP config over in `OPENCODE_CONFIG_CONTENT`
+ * rather than by resolving a file, which is why both are built here as values
+ * (`agentPermission`, `agentMcpServers`) instead of only being written to disk.
+ * The two paths must not be able to disagree: a grant that differs by transport
+ * is a grant nobody reviewed.
+ *
+ * The one thing the SDK does not do is isolate the child, so this is a real
+ * trade against the old `spawn`. It is contained by three things: `signal`
+ * aborts the session and closes the server in a `finally`, the wall-clock
+ * ceiling still applies, and a research failure is already a supported degraded
+ * result rather than a throw that could take the audit down.
+ */
+async function runOpencodeSdk(
   message: string,
   sessionId: string | null,
+  outputPath: string,
   onEvent?: (event: AgentEvent) => void,
 ): Promise<Transcript> {
-  return new Promise<Transcript>((resolvePromise, rejectPromise) => {
-    const args = [
-      "run",
-      "--model",
-      AGENT_MODEL,
-      "--format",
-      "json",
-      "--dir",
-      PROJECT_DIR,
-    ]
-    // The plan calls for one session. The retry continues the same one, so the
-    // model can see what it already said instead of being asked cold.
-    if (sessionId) args.push("--session", sessionId)
-    args.push(message)
+  const { createOpencode } = await import("@opencode-ai/sdk")
 
-    const child = spawn(AGENT_BIN, args, { stdio: ["ignore", "pipe", "pipe"], env: process.env })
+  // A security boundary: the SDK spreads `process.env` into the child and does
+  // not expose an env override, so `OPENCODE_CONFIG_DIR` has to be set here and
+  // restored around the call. Without it the child also resolves the operator's
+  // global `~/.config/opencode/opencode.json` — their MCP servers, agents and
+  // provider keys — on a site the operator does not control.
+  const previousConfigDir = process.env.OPENCODE_CONFIG_DIR
+  process.env.OPENCODE_CONFIG_DIR = PROJECT_DIR
 
-    let stdout = ""
-    let stderr = ""
-    let settled = false
-    let overflow = false
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), AGENT_TIMEOUT_MS)
+  const transcript: Transcript = { ...EMPTY_TRANSCRIPT, toolCalls: [] }
 
-    const timer = setTimeout(() => {
-      if (settled) return
-      settled = true
-      child.kill("SIGKILL")
-      rejectPromise(new RunFailure("timeout", `The agent did not finish within ${AGENT_TIMEOUT_MS} ms.`))
-    }, AGENT_TIMEOUT_MS)
+  try {
+    // The SDK's default port is a fixed 4096, so two servers — or a leftover from
+    // a crashed run — collide and the SDK surfaces a bare `ServeError` with no port
+    // in the message. Port 0 lets the OS pick, and the failure names the port it
+    // actually got.
+    const { client, server } = await createOpencode({
+      port: 0,
+      signal: controller.signal,
+      config: {
+        permission: agentPermission(outputPath) as never,
+        mcp: agentMcpServers() as never,
+      },
+    })
 
-    const finish = (fn: () => void): void => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      fn()
+    try {
+      const created = sessionId
+        ? { data: { id: sessionId } }
+        : ((await client.session.create()).data ?? { id: "" })
+      const id = created.id ?? ""
+      transcript.sessionId = id
+      onEvent?.({ kind: "session", text: id })
+
+      // The event stream is where the tool record comes from, so it is
+      // subscribed before the prompt: a tool that runs and finishes inside a
+      // single prompt call would otherwise be invisible to the sourcing gate.
+      // It is also the only completion signal — `promptAsync` returns as soon as
+      // the turn is queued, so reading the session straight after it returns
+      // finds an empty transcript and degrades a run that is still working.
+      const events = (await client.event.subscribe({ signal: controller.signal })).stream
+      let idle = false
+      let signalIdle: () => void = () => {}
+      const idlePromise = new Promise<void>((r) => {
+        signalIdle = r
+      })
+      // A run is minutes long, so this waits on `session.idle` or the run-wide
+      // abort — never on a fixed delay. A fixed delay would cut a working run off
+      // at whatever number it happened to pick.
+      const waitForIdle = (): Promise<void> =>
+        idle
+          ? Promise.resolve()
+          : Promise.race([
+              idlePromise,
+              new Promise<void>((_, reject) => {
+                if (controller.signal.aborted) {
+                  reject(new RunFailure("timeout", "The agent run was aborted."))
+                  return
+                }
+                controller.signal.addEventListener(
+                  "abort",
+                  () => reject(new RunFailure("timeout", "The agent run was aborted.")),
+                  { once: true },
+                )
+              }),
+            ])
+      const resolveIdle = (): void => {
+        idle = true
+        signalIdle()
+      }
+      void (async () => {
+        try {
+          for await (const event of events) {
+            const payload = event as unknown as Record<string, unknown>
+            const props = payload.properties as Record<string, unknown> | undefined
+            if (payload.type === "session.idle" && props?.sessionID === id) {
+              idle = true
+              resolveIdle()
+              continue
+            }
+            const part = props?.part as Record<string, unknown> | undefined
+            if (!part || typeof part !== "object") continue
+            if (part.type === "tool") {
+              const state = (part.state ?? {}) as Record<string, unknown>
+              const status = String(state.status ?? "unknown")
+              const output =
+                typeof state.output === "string"
+                  ? state.output
+                  : state.error !== undefined
+                    ? safeStringify(state.error)
+                    : safeStringify(state.output)
+              transcript.toolCalls.push({
+                tool: String(part.tool ?? "unknown"),
+                status,
+                ok: status === "completed",
+                input: state.input ?? null,
+                output: output.slice(0, MAX_STORED_OUTPUT),
+              })
+              onEvent?.({ kind: "tool", tool: String(part.tool ?? "unknown"), status })
+            } else if (part.type === "text" && typeof part.text === "string" && part.text.trim()) {
+              transcript.text += part.text
+              onEvent?.({ kind: "text", text: part.text.trim().slice(0, 240) })
+            }
+          }
+        } catch {
+          /* the stream closes when the session ends; nothing to recover */
+        }
+      })()
+
+      await client.session.promptAsync({
+        path: { id },
+        body: { model: modelRef(), parts: [{ type: "text", text: message }] },
+      })
+
+      await waitForIdle()
+
+      // The prompt is async, so the totals are read off the finished session
+      // rather than inferred from a stream that may still be draining. The last
+      // message is not reliably the assistant's — the SDK appends the user turn
+      // too — so the newest assistant message is the one that carries the usage.
+      const messages = ((await client.session.messages({ path: { id } })).data ?? []) as Record<
+        string,
+        unknown
+      >[]
+      const lastAssistant = [...messages]
+        .reverse()
+        .find((m) => (m.info as Record<string, unknown> | undefined)?.role === "assistant")
+      const info = (lastAssistant?.info ?? {}) as Record<string, unknown>
+      const tokens = (info.tokens ?? {}) as Record<string, unknown>
+      transcript.inputTokens = Number(tokens.input ?? transcript.inputTokens)
+      transcript.outputTokens = Number(tokens.output ?? transcript.outputTokens)
+      const cost = Number(info.cost)
+      if (Number.isFinite(cost)) transcript.costUsd = cost
+    } finally {
+      server.close()
     }
 
-    let carry = ""
-    child.stdout?.on("data", (chunk: Buffer) => {
-      if (overflow) return
-      const text = carry + chunk.toString("utf8")
-      const lines = text.split("\n")
-      carry = lines.pop() ?? ""
-      for (const line of lines) {
-        stdout += `${line}\n`
-        if (!onEvent || !line.trim().startsWith("{")) continue
-        let event: Record<string, unknown>
-        try {
-          event = JSON.parse(line) as Record<string, unknown>
-        } catch {
-          continue
-        }
-        const part = event.part as Record<string, unknown> | undefined
-        if (!part || typeof part !== "object") continue
-        if (typeof event.sessionID === "string" && !sessionId) {
-          onEvent({ kind: "session", text: event.sessionID })
-        }
-        if (part.type === "tool") {
-          const state = (part.state ?? {}) as Record<string, unknown>
-          onEvent({
-            kind: "tool",
-            tool: String(part.tool ?? "unknown"),
-            status: String(state.status ?? "unknown"),
-          })
-        } else if (part.type === "text" && typeof part.text === "string" && part.text.trim()) {
-          onEvent({ kind: "text", text: part.text.trim().slice(0, 240) })
-        }
-      }
-      if (stdout.length > MAX_TRANSCRIPT_CHARS) overflow = true
-    })
-    child.stderr?.on("data", (chunk: Buffer) => {
-      if (stderr.length < 4_000) stderr += chunk.toString("utf8")
-    })
-
-    child.on("error", (error: NodeJS.ErrnoException) => {
-      finish(() => {
-        const reason: DegradeReason = error.code === "ENOENT" ? "binary-missing" : "spawn-failed"
-        rejectPromise(new RunFailure(reason, `Could not start \`${AGENT_BIN}\`: ${error.message}`))
-      })
-    })
-
-    child.on("close", (code) => {
-      finish(() => {
-        if (overflow) {
-          rejectPromise(new RunFailure("spawn-failed", "The agent transcript exceeded the size cap."))
-          return
-        }
-        const transcript = parseTranscript(stdout)
-        if (transcript.text.length === 0 && transcript.toolCalls.length === 0) {
-          const detail = stderr.trim().slice(0, 300)
-          rejectPromise(
-            new RunFailure(
-              "empty-output",
-              detail.length > 0
-                ? `The agent produced no answer. ${detail}`
-                : `The agent produced no answer (exit code ${code ?? "null"}).`,
-            ),
-          )
-          return
-        }
-        resolvePromise(transcript)
-      })
-    })
-  })
+    transcript.text = transcript.text.trim()
+    if (transcript.text.length === 0 && transcript.toolCalls.length === 0) {
+      throw new RunFailure("empty-output", "The agent produced no answer.")
+    }
+    return transcript
+  } catch (error) {
+    if (error instanceof RunFailure) throw error
+    if (controller.signal.aborted) {
+      throw new RunFailure("timeout", `The agent did not finish within ${AGENT_TIMEOUT_MS} ms.`)
+    }
+    const message = error instanceof Error ? error.message : String(error)
+    const reason: DegradeReason = /ENOENT|not found/i.test(message) ? "binary-missing" : "spawn-failed"
+    throw new RunFailure(reason, `Could not start \`${AGENT_BIN}\`: ${message}`)
+  } finally {
+    clearTimeout(timer)
+    if (previousConfigDir === undefined) delete process.env.OPENCODE_CONFIG_DIR
+    else process.env.OPENCODE_CONFIG_DIR = previousConfigDir
+  }
 }
+
 
 /* -------------------------------------------------------------------------- */
 /* public api                                                                  */
@@ -694,6 +837,12 @@ export async function runResearch(
   mkdirSync(RESEARCH_OUTPUT_DIR, { recursive: true })
   rmSync(outputPath, { force: true })
 
+  // The one grant that must name a real path, so it is written per run rather
+  // than at import time. `AGENT_PROJECT_DIR` overrides the workspace, in which
+  // case there is nothing generated to write into and the operator's own config
+  // governs the child.
+  if (!process.env.AGENT_PROJECT_DIR) writeAgentPermissions(outputPath)
+
   const prompt = buildAgentPrompt(variant, {
     ...request,
     grantedTools: allowlist,
@@ -722,7 +871,7 @@ export async function runResearch(
         : `${prompt}\n\n---\n\n## Your previous reply was rejected\n\n${lastViolation.detail}\n\nReply again with the complete JSON object and nothing else.`
 
     try {
-      transcript = await runOpencode(message, sessionId, onEvent)
+      transcript = await runOpencodeSdk(message, sessionId, outputPath, onEvent)
     } catch (error) {
       const failure =
         error instanceof RunFailure

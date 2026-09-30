@@ -3,7 +3,8 @@ import { fetchConfig, runAudit, API } from "./api"
 import type { LogLine, Stage } from "./JevHeader"
 import { GuideTour } from "./GuideTour"
 import { Onboarding, type GscConnection } from "./Onboarding"
-import type { GscCheck } from "./CapacityBadge"
+import { type GscCheck } from "./CapacityBadge"
+import { CapacityCluster } from "./CapacityCluster"
 import type { AutofillRun } from "./researchTypes"
 import { SessionBar, type SessionStage, type SessionSummary } from "./SessionBar"
 import { CrawlBar } from "./CrawlBar"
@@ -98,6 +99,30 @@ function FormBanner({ form, onExpand }: { form: AuditForm; onExpand: () => void 
   const domain = domainOf(form.url)
   const rivals = form.competitors.split(/[\n,]/).filter((v) => v.trim()).length
   const badges: Array<{ k: string; v: string; hint?: string }> = []
+
+  // With no site there is no run to describe. `maxPages`, `maxKeywords` and
+  // `runJev` are still sitting at their defaults, so printing them here would
+  // state a configuration the operator never chose — a collapsed form that
+  // reads "15 pages · 24 keywords · Jev on" for a run that does not exist.
+  if (!domain) {
+    return (
+      <div className="formbanner" data-tour="form-banner">
+        <Favicon domain="" />
+        <span className="fb-domain" title="">
+          no site yet
+        </span>
+        <span className="fb-badges">
+          <span className="fb-badge">
+            <span className="k">run</span>
+            <span className="v">nothing to run yet</span>
+          </span>
+        </span>
+        <button type="button" className="ghost fb-expand" onClick={onExpand}>
+          Set up a run
+        </button>
+      </div>
+    )
+  }
 
   if (form.businessName.trim()) badges.push({ k: "business", v: form.businessName.trim() })
   if (form.market.trim()) badges.push({ k: "market", v: form.market.trim() })
@@ -832,13 +857,20 @@ export default function App() {
   const newPageCount = subjects.filter((s) => s.isNewPage).length
   const refreshCount = subjects.length - newPageCount
 
-  const decidedUrls = useMemo(() => new Set(decisions.map((d) => d.url)), [decisions])
-
   /**
    * The gate's own `notDecided` list plus the grey-zone items Jev returned
-   * mid-run, de-duplicated by url: a page can be in both sources and must be
-   * listed once. Mid-run there is no `notDecided` yet, so grey-zone items are
-   * the only honest list available.
+   * mid-run, de-duplicated by url.
+   *
+   * A page that produced a decision is still listed when anything on it landed
+   * in the grey zone. "Decided" and "committed on every question" are different
+   * things: a page can earn a rewrite in 02 and still leave
+   * `competitor_distinctiveness` at P(yes) 0.55, and that uncertainty is exactly
+   * what this panel exists to surface. Filtering these out by `decidedUrls` made
+   * the panel read 0 on runs where Jev was genuinely unsure — the list was
+   * emptying itself, which is the one thing an honesty panel must never do.
+   *
+   * A page appearing in both 02 and 05 is not duplication. 02 is the work,
+   * 05 is where the work came from and what is still open.
    */
   const notDecided = useMemo(() => {
     const seen = new Set<string>()
@@ -849,7 +881,7 @@ export default function App() {
       rows.push({ ...item, bandLabel: "to verify" })
     }
     for (const page of pages) {
-      if (seen.has(page.url) || decidedUrls.has(page.url) || !page.needsHuman) continue
+      if (seen.has(page.url) || !page.needsHuman) continue
       seen.add(page.url)
       rows.push({
         url: page.url,
@@ -868,7 +900,7 @@ export default function App() {
       })
     }
     return rows
-  }, [report?.notDecided, pages, keywords, decidedUrls])
+  }, [report?.notDecided, pages, keywords])
 
   const notDecidedCount = notDecided.length
 
@@ -927,11 +959,13 @@ export default function App() {
           Take the tour
         </button>
         {config && (
-          <span className={`pill ${config.jevBackend === "zen" ? "live" : "off"}`}>
-            {config.jevBackend === "zen"
-              ? `jev live · ${config.jevModel}`
-              : `local judge, not Jev · ${config.jevModel} unreachable`}
-          </span>
+          <CapacityCluster
+            config={config}
+            gsc={gsc}
+            url={form.url}
+            onOpenOnboarding={() => setOnboardingOpen(true)}
+            onRecheck={() => void checkGsc(form.url)}
+          />
         )}
       </div>
 
@@ -990,12 +1024,7 @@ export default function App() {
           type="button"
           className="formtoggle"
           onClick={() => setFormOpen(false)}
-          disabled={!form.url.trim()}
-          title={
-            form.url.trim()
-              ? "Collapse the form and show the run summary"
-              : "Enter a website first"
-          }
+          title="Collapse the form and show the run summary"
           aria-label="Collapse the form"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
@@ -1007,7 +1036,7 @@ export default function App() {
           <input
             id="url"
             type="text"
-            placeholder="bene2luxe.com"
+            placeholder="https://trustmrr.com/"
             value={form.url}
             onChange={(e) => setForm({ ...form, url: e.target.value })}
             onKeyDown={(e) => {
@@ -1020,7 +1049,7 @@ export default function App() {
           <input
             id="name"
             type="text"
-            placeholder="Bene2Luxe"
+            placeholder="TrustMRR"
             value={form.businessName}
             onChange={(e) => setForm({ ...form, businessName: e.target.value })}
           />
@@ -1030,7 +1059,7 @@ export default function App() {
           <input
             id="market"
             type="text"
-            placeholder="Switzerland and France"
+            placeholder="Worldwide, English-speaking"
             value={form.market}
             onChange={(e) => setForm({ ...form, market: e.target.value })}
           />
@@ -1040,7 +1069,7 @@ export default function App() {
           <label htmlFor="ctx">What the business actually does</label>
           <textarea
             id="ctx"
-            placeholder="Luxury second-hand clothing resale for women in Switzerland and France. Revenue comes from selling pre-owned Chanel, Prada and Hermès pieces."
+            placeholder="Verified customer reviews for SaaS and online services. Revenue comes from subscriptions, with a free tier that buyers can use before they pay."
             value={form.businessContext}
             onChange={(e) => setForm({ ...form, businessContext: e.target.value })}
           />
@@ -1053,7 +1082,7 @@ export default function App() {
           <label htmlFor="comp">Competitors — one per line</label>
           <textarea
             id="comp"
-            placeholder={"vinted.com\ntherealreal.com\nebay.com"}
+            placeholder={"g2.com\ncapterra.com\ntrustpilot.com"}
             value={form.competitors}
             onChange={(e) => setForm({ ...form, competitors: e.target.value })}
             style={{ minHeight: 54 }}
@@ -1245,7 +1274,7 @@ export default function App() {
         <section className="half advice" aria-labelledby="dnow-h" data-tour="dnow">
           <div className="halfhead">
             <span className="idx">02</span>
-            <h2 id="dnow-h">do this now</h2>
+            <h2 id="dnow-h">to do on {domainOf(form.url) || "your website"}</h2>
             <span className="what">One change per page, the one Jev ranked first, each with the counted fact behind it.</span>
             <span className="count">
               {decisions.length} pages decided · {notDecidedCount} held back in 05
@@ -1276,35 +1305,9 @@ export default function App() {
           </div>
         </section>
 
-        <section className="half advice" aria-labelledby="pages-h" data-tour="pages-to-build">
-          <div className="halfhead">
-            <span className="idx">03</span>
-            <h2 id="pages-h">pages to build</h2>
-            <span className="what">Only terms someone actually typed, or that a rival already published for.</span>
-            <span className="count">
-              {newPageCount} to build · {refreshCount} sent to refresh in 02 instead
-            </span>
-          </div>
-          <div className="halfbody">
-            <Explain>
-              <b>What this gives you:</b> the terms that earned a new page, and where each one should
-              point.
-            </Explain>
-            <PagesToBuild
-              subjects={subjects}
-              running={running && !report}
-              hasRun={hasRun}
-              presearchRan={presearchRan}
-              presearchReason={presearchReason}
-              termsJudged={report ? report.totals.keywordsJudged : keywords.length}
-              refreshCount={refreshCount}
-            />
-          </div>
-        </section>
-
         <section className="half advice" aria-labelledby="rivals-h" data-tour="rivals-panel">
           <div className="halfhead">
-            <span className="idx">04</span>
+            <span className="idx">03</span>
             <h2 id="rivals-h">rivals</h2>
             <span className="what">Side by side on the same rubric, judged from pages crawled off each rival&rsquo;s own site.</span>
             <span
@@ -1343,6 +1346,32 @@ export default function App() {
           </div>
         </section>
 
+<section className="half advice" aria-labelledby="pages-h" data-tour="pages-to-build">
+          <div className="halfhead">
+            <span className="idx">04</span>
+            <h2 id="pages-h">pages to build</h2>
+            <span className="what">Only terms someone actually typed, or that a rival already published for.</span>
+            <span className="count">
+              {newPageCount} to build · {refreshCount} sent to refresh in 02 instead
+            </span>
+          </div>
+          <div className="halfbody">
+            <Explain>
+              <b>What this gives you:</b> the terms that earned a new page, and where each one should
+              point.
+            </Explain>
+            <PagesToBuild
+              subjects={subjects}
+              running={running && !report}
+              hasRun={hasRun}
+              presearchRan={presearchRan}
+              presearchReason={presearchReason}
+              termsJudged={report ? report.totals.keywordsJudged : keywords.length}
+              refreshCount={refreshCount}
+            />
+          </div>
+        </section>
+
         <section className="half advice" aria-labelledby="undecided-h" data-tour="undecided">
           <div className="halfhead">
             <span className="idx">05</span>
@@ -1359,7 +1388,7 @@ export default function App() {
             </Explain>
             <details className="undecided">
               <summary>
-                <span className="uk">open the held-back list</span>
+                <span className="uk">held-back list</span>
                 <span className="ud">
                   What Jev refused to commit to, so you can judge it yourself. Nothing here carries a fix.
                 </span>
@@ -1370,7 +1399,15 @@ export default function App() {
               <div className="ubody">
                 {notDecided.length === 0 ? (
                   <div className="dempty">
-                    {hasRun ? (
+                    {running && (pages.length > 0 || keywords.length > 0) ? (
+                      <>
+                        <b>nothing held back yet</b>
+                        <p>
+                          Still judging. This list fills as answers land outside the decisive band, so an
+                          empty one mid-run means nothing so far — not that there is nothing.
+                        </p>
+                      </>
+                    ) : hasRun ? (
                       <>
                         <b>nothing in the grey zone</b>
                         <p>
@@ -1431,8 +1468,8 @@ export default function App() {
                   running={running && !report}
                 />
                 <Explain>
-                  <b>What this gives you:</b> the raw gap table behind section 03 — every mined term,
-                  who covers it, whether you do, and where a page would go. Section 03 is the shortlist
+                  <b>What this gives you:</b> the raw gap table behind section 04 — every mined term,
+                  who covers it, whether you do, and where a page would go. Section 04 is the shortlist
                   drawn from it; this is the whole set, including the rows the gate dropped.
                 </Explain>
               </div>
@@ -1815,9 +1852,9 @@ export default function App() {
                   <h2>score</h2>
                   <Explain>
                     <b>What this gives you:</b> a summary of this run — the score, the share of decisive
-                    answers, median and p95 latency, and which model produced it. The pill in the header
-                    says whether those probabilities are calibrated; read the score as a summary, not a
-                    league table.
+                    answers, median and p95 latency, and which model produced it. The layer icons in the
+                    header say whether those probabilities are calibrated; read the score as a summary,
+                    not a league table.
                   </Explain>
                   {report ? (
                     <>
@@ -1891,7 +1928,7 @@ export default function App() {
             </div>
             <div className="note">
               Provenance, not advice. <b>01 SCRAPED</b> is {report.totals.pagesCrawled} pages fetched and
-              counted in code. <b>02 DO THIS NOW</b> and <b>03 PAGES TO BUILD</b> are drawn from{" "}
+              counted in code. <b>02 TO DO</b> and <b>04 PAGES TO BUILD</b> are drawn from{" "}
               {report.totals.judgements} Jev calls at $0.042 per million input tokens, scored {report.score}
               /100. No count of searches appears anywhere in this: subject priority is computed in code
               from on-page frequency, heading placement and page spread, because Jev carries no index, and

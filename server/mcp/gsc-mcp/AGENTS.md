@@ -4,21 +4,27 @@
 
 ## OVERVIEW
 
-60-tool Google MCP (GSC + GA4 + CrUX) over stdio, vendored read-only. It is optional and
+33-tool Google MCP (Search Console only) over stdio, vendored read-only. It is optional and
 feature-gated, and it is NOT the path the Node app's own GSC client uses.
+
+**It is read-only by construction.** The 27 tools that wrote to Google, pulled GA4 analytics,
+queried CrUX field data, snapshotted pages for drift comparison, or joined GSC against GA4 were
+removed, not disabled — `agent.ts` holds `FORBIDDEN_AGENT_TOOLS` as a second, independent refusal,
+so adding one back to the registry does not make it reachable. The research agent reads a site the
+operator does not control, so text on that page can read as an instruction; nothing in the product
+asks the agent to change anything.
 
 ## WHERE TO LOOK
 
 | Task | Location | Notes |
 |------|----------|-------|
 | Launcher, the ONLY dep declaration | `run.sh` | 39 LOC, 3-tier fallback |
-| Entry point | `server.py` | Py3.11 gate, 60-tool loop, bare `mcp.run()` |
+| Entry point | `server.py` | Py3.11 gate, 33-tool loop, bare `mcp.run()` |
 | Tool list, single source of truth | `registry.py`, `properties.py:6-78` | `TOOLS` + import-time assert vs flat `_ALL_TOOLS` (no read/write split) |
 | Destructive tools | `tools/indexing.py`, `tools/sitemaps.py` | see ANTI-PATTERNS 4 |
 | Credential resolution | `auth.py` | env vars + `sites.json` |
 | SSRF / DNS-rebind guard | `url_safety.py` | not thread-safe by design |
-| Live mutable state | `tools/drift.py:50-51` | SQLite outside the repo |
-| Largest files | `drift.py` 820, `content.py` 744, `ga4.py` 639 | 23 `.py` = 6,486 LOC |
+| Largest files | `content.py` 744, `technical.py` 464, `analytics.py` 458 | 13 `.py` = 3,498 LOC |
 
 ## CONVENTIONS
 
@@ -54,15 +60,8 @@ feature-gated, and it is NOT the path the Node app's own GSC client uses.
 3. **Never surface `quota_remaining` as fact.** `quota.py:5` is a module-level in-memory counter. It
    resets on every process restart and is never persisted, so it cannot stop a restart loop from
    exceeding Google's real 200/day Indexing API limit and earning a 24h suspension.
-4. **Never call a write tool without naming the blast radius.** `indexing.py:24` `submit_url` with
-   `url_type='URL_DELETED'` tells Google to DROP the URL from the index. `indexing.py:315`
-   `force_reindex` and `indexing.py:246` `submit_sitemap_urls` each write a whole sitemap's worth of
-   URLs from one call. `sitemaps.py:54` `sitemaps_delete` is guarded only by a string-shape check
-   (`sitemaps.py:61-64`: ends in `.xml` or contains `/sitemap`) — not an ownership check, so any
-   `.xml` passes. Also write-ish: `sitemaps.py:42` `submit_sitemap`, `indexing.py:107`
-   `indexnow_submit`, `drift.py:541` `drift_baseline`. No confirmation, no undo.
-5. **Never copy `retry.py` as a resilience model.** `retry.py:36` is pure exponential with no jitter,
-   so `force_reindex` / `submit_batch` fan-out synchronises workers onto the same retry instant.
+5. **Never copy `retry.py` as a resilience model.** `retry.py:36` is pure exponential with no
+   jitter, so every retrying caller synchronises onto the same instant.
    `server/src/crawl.ts:389` does add jitter, with a comment explaining why.
 6. **Never assume concurrent fetches are safe.** `url_safety.py:250-254` raises rather than degrades,
    because the global `socket.getaddrinfo` patch (`url_safety.py:287`) sits behind a non-reentrant
@@ -88,16 +87,14 @@ feature-gated, and it is NOT the path the Node app's own GSC client uses.
   `${GSC_SERVICE_ACCOUNT_PATH:-...}`, which honours a pre-existing value.
 - **Env vars read:** `GSC_SERVICE_ACCOUNT_PATH` (auth.py:38,104,143), `GSC_SKIP_OAUTH` (auth.py:142,
   defaulted true at run.sh:18), `GSC_CREDENTIALS_PATH` (auth.py:123), `GSC_NO_BROWSER` (auth.py:130),
-  `GA4_PROPERTY_ID` (auth.py:303), `CRUX_API_KEY` (crux.py:41), `GOOGLE_API_KEY` (technical.py:509,
-  needed by `pagespeed_audit`, and missing from `.env.example`).
+  `GOOGLE_API_KEY` (needed by `pagespeed_audit`, and missing from `.env.example`).
 - **`sites.json` (`auth.py:28`) is absent**, so `_load_sites()` returns `[]` and every call takes the
   legacy env-var path (`auth.py:140-153`). The whole `account=` multi-site machinery is dormant.
-  Conversely, 17 of the 60 tools take **no** `account` param (all 3 crux, all 4 content, all 3
-  drift, `schema_*`, `ai_visibility_audit`, `gbp_deprecation_lint`, `pagespeed_audit`,
-  `parasite_risk`, `get_capabilities`) and act on a raw URL, so they work regardless.
+  Conversely, 9 of the 33 tools take **no** `account` param (all 4 content, `schema_validate`,
+  `ai_visibility_audit`, `pagespeed_audit`, `parasite_risk`, `get_capabilities`) and act on a raw
+  URL, so they work regardless.
 - **There is no Python test suite.** No pytest, unittest, conftest or runner; `npm run verify` is
   TypeScript-only and covers zero Python. Closest thing: `python -m gsc_mcp.url_safety <url>
   --strict --json`. `registry.py:138-142` (`assert set(TOOLS) == set(_ALL_TOOLS)`) passes today and is
-  the strongest correctness net in the package. OAuth tokens and the drift DB
-  (`drift.py:50-51`) live outside the repo, together in the platform user-data dir.
-- **Docstring drift:** `properties.py:70` says "59 available tool names"; the payload emits 60.
+  the strongest correctness net in the package. OAuth tokens live outside the repo, in the
+  platform user-data dir.

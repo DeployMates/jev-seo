@@ -1,6 +1,6 @@
 """
 GSC MCP authentication module.
-Multi-site support: pass account="mirorpay" or account="bene2luxe" to any service function.
+Multi-site support: pass account="brand-a" or account="brand-b" to any service function.
 """
 
 import json
@@ -16,14 +16,11 @@ from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
 from platformdirs import user_data_dir
 
-from google.analytics.data_v1alpha import AlphaAnalyticsDataClient
-from google.analytics.data_v1beta import BetaAnalyticsDataClient
 
-from gsc_mcp.constants import SCOPES_GSC, SCOPES_INDEXING, SCOPES_GA4
+from gsc_mcp.constants import SCOPES_GSC
 
 _TOKEN_DIR = Path(user_data_dir("gsc-mcp"))
 _TOKEN_GSC = _TOKEN_DIR / "token_gsc.json"
-_TOKEN_INDEXING = _TOKEN_DIR / "token_indexing.json"
 
 _SITES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sites.json")
 
@@ -270,58 +267,4 @@ def get_searchconsole_service(account: str = ""):
     return _GSCService(token)
 
 
-def get_indexing_service(account: str = ""):
-    """Build a Google Indexing API service (multi-site aware)."""
-    site = _resolve_site(account)
-    if site:
-        creds = _get_service_account_creds(SCOPES_INDEXING, site["credentials_path"])
-    else:
-        creds = _resolve_creds(SCOPES_INDEXING, _TOKEN_INDEXING)
-    return build("indexing", "v3", credentials=creds)
 
-
-_TOKEN_GA4 = _TOKEN_DIR / "token_ga4.json"
-
-
-def get_ga4_property_id(account: str = "", override: str | None = None) -> str:
-    """Resolve the GA4 property ID.
-
-    Priority:
-    1. `override` parameter (explicit override)
-    2. sites.json entry for the given account
-    3. GA4_PROPERTY_ID env var (legacy mode)
-
-    Returns the ID prefixed with 'properties/' if not already.
-    """
-    if override:
-        prop = override.strip()
-    else:
-        site = _resolve_site(account)
-        if site:
-            prop = site.get("ga4_property_id", "").strip()
-        else:
-            prop = os.environ.get("GA4_PROPERTY_ID", "").strip()
-        if not prop:
-            raise RuntimeError(
-                "No GA4 config: GA4_PROPERTY_ID environment variable is not set "
-                "and no ga4_property_id in sites.json"
-            )
-    return prop if prop.startswith("properties/") else f"properties/{prop}"
-
-
-def _ga4_creds(account: str = ""):
-    """Resolve GA4 credentials for the given account."""
-    site = _resolve_site(account)
-    if site:
-        return _get_service_account_creds(SCOPES_GA4, site["credentials_path"])
-    return _resolve_creds(SCOPES_GA4, _TOKEN_GA4)
-
-
-def get_ga4_service(account: str = "") -> BetaAnalyticsDataClient:
-    """Build a GA4 BetaAnalyticsDataClient (multi-site aware)."""
-    return BetaAnalyticsDataClient(credentials=_ga4_creds(account))
-
-
-def get_alpha_ga4_service(account: str = "") -> AlphaAnalyticsDataClient:
-    """Build a GA4 AlphaAnalyticsDataClient (multi-site aware)."""
-    return AlphaAnalyticsDataClient(credentials=_ga4_creds(account))

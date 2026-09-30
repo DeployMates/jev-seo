@@ -21,7 +21,6 @@ if command -v uv >/dev/null 2>&1; then
   exec uv run --quiet --no-project \
     --with "mcp[cli]<2" \
     --with google-api-python-client \
-    --with google-analytics-data \
     --with google-auth \
     --with google-auth-oauthlib \
     --with requests \

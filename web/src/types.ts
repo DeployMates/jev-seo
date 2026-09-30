@@ -189,31 +189,62 @@ export interface RivalCap {
 }
 
 /* ── run diff (mirrors server/src/history.ts) ──
- * `open` is a disjunction — a decisive top change OR an act-band finding — and
- * that is the only thing the diff tracks. It is not a ranking and not a
- * position, because this system has neither. */
+ * A page is `raised` when the run produced a decisive top change or an act-band
+ * finding, and `reachable` only when it was crawled AND judged. Only reachable
+ * in both runs is a basis for comparison; everything else is `not_comparable`.
+ * It is never folded into a closed state. */
 
-export type DeltaState = "fixed" | "still_open" | "new" | "regressed" | "clean"
+export type PageBandWord = "decisive" | "to verify" | "needs a human"
+
+export type DeltaState =
+  | "still_open"
+  | "changed"
+  | "not_longer_raised"
+  | "regressed"
+  | "newly_raised"
+  | "not_comparable"
+  | "clean"
 
 export interface PageDelta {
   path: string
   url: string
   state: DeltaState
-  openNow: boolean
-  openBefore: boolean
+  comparable: boolean
+  raisedNow: boolean
+  raisedBefore: boolean
+  /** The key, so "the same change" is decidable rather than a string match. */
+  topChangeKey: string | null
   topChange: string | null
+  bandNow: PageBandWord | null
+  bandBefore: PageBandWord | null
 }
 
 export interface RunDelta {
   /** `null` is the first run for this root, not a degenerate case. */
   baseline: null | { generatedAt: string; score: number; openPages: number }
   scoreDelta: number | null
-  fixed: PageDelta[]
+  /** Both runs judged by the same model. False withholds `scoreDelta`. */
+  judgedBothRuns: boolean
   stillOpen: PageDelta[]
-  new: PageDelta[]
+  changed: PageDelta[]
+  notLongerRaised: PageDelta[]
   regressed: PageDelta[]
-  /** A count, not a list — there is nothing to render per row. */
+  newlyRaised: PageDelta[]
+  notComparable: PageDelta[]
+  /**
+   * A count, never a list. Note it is a mixture: it absorbs pages reachable in
+   * both that neither run raised, and pages discovered this run that it did not
+   * raise. It is therefore not a denominator for anything.
+   */
   clean: number
+  unreachableBefore: number
+  /**
+   * Pages both runs could speak about: crawled AND judged in each. A different
+   * number from `baseline.openPages`, which counts what the earlier run raised —
+   * the two leak, so a numerator summed over the moved buckets is not a subset
+   * of `openPages`.
+   */
+  comparableCount: number
   pagesCrawledNow: number
   pagesCrawledBefore: number
 }

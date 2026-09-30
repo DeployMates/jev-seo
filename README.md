@@ -136,10 +136,10 @@ Authorization: Bearer public          # the literal string, no secret
 ```
 
 **No account, no API key, no signup.** The Zen free tier serves Jev with the literal credential
-`public` plus an OpenCode client fingerprint — the same recipe `omp-proxy-local` uses for Zen's
-chat models, and it works for Jev too. The `x-opencode-session` / `x-opencode-request` pair must be
-one a real `opencode run` minted, so those two ids are read from `~/.omp/agent/models.yml` and can
-be overridden with `ZEN_SESSION_ID` / `ZEN_REQUEST_ID`.
+`public` plus an OpenCode client fingerprint — the same recipe the local `proxy-local` opencode
+plugin uses for Zen's chat models, and it works for Jev too. The `x-opencode-session` /
+`x-opencode-request` pair must be one a real `opencode run` minted, so those two ids are pinned in
+`config.ts` as defaults and can be overridden with `ZEN_SESSION_ID` / `ZEN_REQUEST_ID`.
 
 `jev-1.13-free` is the keyless tier. The rate-limited `jev-1.13` answers `401 Rate-limited Zen models
 require a workspace`; set `ZEN_API_KEY` if you have one. Model is pinned by `JEV_MODEL` in `.env`.
@@ -153,6 +153,11 @@ Required: **Node &ge; 20.11** and an internet connection. Nothing else.
 Optional, and reported as optional by `doctor`:
 
 - **`opencode`** — only for `/api/research` (the deep-research button). An audit runs fully without it.
+  The research run is driven through the **opencode SDK** (`@opencode-ai/sdk`), which starts an
+  `opencode serve` process and talks to it over HTTP — the permission block and the MCP server list
+  are handed over as values, not as files the child has to resolve.
+- **`open-websearch`** — an MCP server for the search half of a research run. It is opt-in via
+  `JEV_WEBSEARCH_MCP_DIR`; without it the run has no search tool and degrades visibly.
 - **`uv` / Python 3.11+** — only for the agent-side Search Console tools. The audit path mints its
   own JWT with `node:crypto` and calls Google's REST API directly, so it never touches Python.
 - **A GCP service account** — the key that lets the agent reach Search Console. Without one the
@@ -176,7 +181,11 @@ npm garbage-collects, so anything stored there would vanish without warning.
 | `JEV_ENV_FILE` | explicit `.env` path |
 | `JEV_WEB_DIST` | explicit built-UI path |
 | `JEV_PROXIES_FILE` | proxy pool, default `<dataDir>/proxies.txt` then `./proxies.txt` |
+| `JEV_PROXY_POOL` | proxy pool for the Zen judge, default `~/.config/opencode/plugins/proxies.txt` |
 | `JEV_MODEL` | judge model, default `jev-1.13-free` |
+| `JEV_WEBSEARCH_MCP_DIR` | path to the `open-websearch` MCP; search degrades without it |
+| `JEV_UNDETECTED_BROWSER_CMD` | command that starts the browser MCP, if you have one |
+| `AGENT_TIMEOUT_MS` | research run ceiling, default 600000 (10 min) |
 | `ZEN_API_KEY` | only needed for the rate-limited `jev-1.13` |
 
 `.env` is read from `JEV_ENV_FILE`, then `~/.jev-seo/.env`, then the current directory — in that
@@ -200,8 +209,8 @@ jev-seo start --proxy-pool ./proxies.txt   # use this pool
 jev-seo start --no-proxy                   # bypass it, go direct
 ```
 
-One `IP:PORT:USER:PASS` per line, `#` for comments, optional `|key=value`
-metadata after a pipe. The default pool is
+One `IP:PORT:USER:PASS` per line, or a bare `IP:PORT` for a provider that needs no credentials.
+`#` for comments, optional `|key=value` metadata after a pipe. The default pool is
 `~/.config/opencode/plugins/proxies.txt`; `JEV_PROXY_POOL` overrides it. A proxy
 that fails — 402, dead host, tunnel that never opens — is parked for 15 minutes
 and the request retried on the next one. Credentials are never printed.
@@ -335,11 +344,16 @@ the 25 files in `web/src`, the packaging boundary, and the prohibitions that are
 | [`docs/UX-VALUE.md`](docs/UX-VALUE.md) | Exact shippable microcopy, voice rules, banned words |
 | [`docs/RISK-REVIEW.md`](docs/RISK-REVIEW.md) | Correctness audit of the UI contract against the code — 6 unfixed critical honesty bugs |
 | [`docs/PLAN-npm-distribution.md`](docs/PLAN-npm-distribution.md) | The single-port npx distribution, P1–P6 shipped, P7 not started |
-| [`docs/PLAN-agent-research-and-gsc-onboarding.md`](docs/PLAN-agent-research-and-gsc-onboarding.md) | Agent research layer + GSC onboarding — **proposed, not started** |
+| [`docs/PLAN-agent-research-and-gsc-onboarding.md`](docs/PLAN-agent-research-and-gsc-onboarding.md) | Agent research layer + GSC onboarding — shipped; SDK-driven since the migration |
 | [`.assets/layers.html`](.assets/layers.html) | The interactive four-layer diagram |
 
 > Read [`docs/RISK-REVIEW.md`](docs/RISK-REVIEW.md) before changing the decision panel. It documents
 > six cases where the panel can state a falsehood while every invariant still passes.
+
+> **One known open risk.** A research run reads a website you do not control, so text on that page
+> can read as an instruction to the agent. The config blocks the shell, but the key it uses is not
+> the one opencode 1.18.33 recognises, so a run can still execute commands. Until that is fixed, only
+> point `/api/research` at sites you trust. Details in [`docs/LAYERS.md`](docs/LAYERS.md).
 
 ---
 

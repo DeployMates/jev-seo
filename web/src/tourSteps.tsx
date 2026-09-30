@@ -185,7 +185,7 @@ export const TOUR_STEPS: Step[] = [
   {
     target: '[data-tour="dnow"]',
     placement: "top",
-    title: "02 DO THIS NOW — the deliverable",
+    title: "02 TO DO — the deliverable",
     content: (
       <div className="tourbody">
         <p>
@@ -203,9 +203,27 @@ export const TOUR_STEPS: Step[] = [
     ),
   },
   {
+    target: '[data-tour="rivals-panel"]',
+    placement: "top",
+    title: "03 RIVALS — what they do that you don't",
+    content: (
+      <div className="tourbody">
+        <p>
+          Each rival judged on the same rubric, with the reason it was chosen and the page titles their own
+          crawl produced.
+        </p>
+        <p className="tourhint">
+          <b>Important:</b> we never read a live search results page. A rival match is topic overlap across
+          pages we crawled from their site — never a ranking, and never a position. Anything claiming otherwise
+          would be guessing.
+        </p>
+      </div>
+    ),
+  },
+  {
     target: '[data-tour="pages-to-build"]',
     placement: "top",
-    title: "03 PAGES TO BUILD — the new pages",
+    title: "04 PAGES TO BUILD — the new pages",
     content: (
       <div className="tourbody">
         <p>
@@ -217,24 +235,6 @@ export const TOUR_STEPS: Step[] = [
           <b>Produces:</b> a short ordered list of pages to create, each with what to write, where it goes,
           and who covers it today. Terms we are not confident enough about are held back rather than dressed up
           as advice.
-        </p>
-      </div>
-    ),
-  },
-  {
-    target: '[data-tour="rivals-panel"]',
-    placement: "top",
-    title: "04 RIVALS — what they do that you don't",
-    content: (
-      <div className="tourbody">
-        <p>
-          Each rival judged on the same rubric, with the reason it was chosen and the page titles their own
-          crawl produced.
-        </p>
-        <p className="tourhint">
-          <b>Important:</b> we never read a live search results page. A rival match is topic overlap across
-          pages we crawled from their site — never a ranking, and never a position. Anything claiming otherwise
-          would be guessing.
         </p>
       </div>
     ),

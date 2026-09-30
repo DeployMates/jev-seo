@@ -209,6 +209,14 @@ export function DoThisNow({
             </p>
           </>
         )}
+        <button
+          type="button"
+          className="dexport"
+          disabled
+          title="A run has to produce at least one decision row before there is anything to download."
+        >
+          nothing to download yet
+        </button>
       </div>
     )
   }
@@ -236,10 +244,10 @@ export function DoThisNow({
         <button
           type="button"
           className="dexport"
-          title={`Download these ${rows.length} rows as CSV. One row per page: path, the change raised, its band, its probability, and its counted facts.`}
-          onClick={() => downloadDecisionsCsv(rows, { site, generatedAt, model })}
+          title={`Download these ${rows.length} rows as CSV. One row per page: path, the change raised, its band, its probability, and how it moved.`}
+          onClick={() => downloadDecisionsCsv(rows, { site, generatedAt, model, delta })}
         >
-          Download these rows as CSV
+          {delta?.baseline ? "Download these rows as CSV" : "Download this run as CSV"}
         </button>
       </div>
       <p className="dnote faint">
@@ -247,8 +255,12 @@ export function DoThisNow({
         Every number is quoted from the tool that returned it. None was estimated here.
       </p>
       <p className="dnote faint">
-        deliberately not in this file — no search volume · no keyword positions · no backlink counts
-        · no promised outcome · page text
+        deliberately not in this file
+        <br />
+        no search volume · no keyword positions · no backlink counts · no promised outcome
+      </p>
+      <p className="dnote faint">
+        page text · anything a model inferred that no tool returned
       </p>
     </div>
   )

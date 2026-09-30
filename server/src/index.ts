@@ -15,6 +15,7 @@ import { resolve } from "node:path"
 import { DEFAULT_CONCURRENCY, DEFAULT_MAX_PAGES, PORT } from "./config.js"
 import { envFileLoaded } from "./config.js"
 import { dataDir, probeWritable, webDist } from "./paths.js"
+import { proxyStatus } from "./zenProxy.js"
 import { runAudit, type AuditEvent, type AuditKeywordSeed, type AuditMetric, type AuditRivalProposal } from "./audit.js"
 import { HISTORY_LIMIT, diffRuns, loadHistory } from "./history.js"
 import { crawlForResearch } from "./crawlDigest.js"
@@ -55,6 +56,10 @@ function capacity() {
     agentConfigured: isAgentAvailable(),
     agentModel: activeAgentModel(),
     gscConfigured: gscConfigured(),
+    // The pool the keyless Zen tier actually egresses through. Reported rather
+    // than assumed: `pool: 0` means the server started direct, which is a
+    // legitimate configuration and a common cause of a keyless 429.
+    proxy: proxyStatus(),
   }
 }
 
