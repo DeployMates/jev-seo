@@ -2,8 +2,8 @@
 
 Status: **implemented** · P1–P6 shipped and clean-room verified · P7 not started
 Scope: `/Users/vakandi/Documents/jev-seo`
-Package: **`@vakandi/jev-seo`** (unscoped `jev-seo` was taken on 2026-09-26)
-Goal: `npx @vakandi/jev-seo` starts the whole product — API + UI — from a clean machine with no clone, no Python, and no `npm install` run by hand.
+Package: **`jevseo`** (unscoped `jev-seo` was taken on 2026-09-26)
+Goal: `npx jevseo` starts the whole product — API + UI — from a clean machine with no clone, no Python, and no `npm install` run by hand.
 
 ---
 
@@ -51,7 +51,7 @@ Four things in this document turned out to be wrong, or were changed on purpose.
 The reasoning is kept so the next reader does not "fix" them back:
 
 - **§1.3 said `name: "jev-seo"`.** Wrong: the unscoped name is already
-  registered to someone else. It ships as **`@vakandi/jev-seo`**. The `bin` is
+  registered to someone else. It ships as **`jevseo`**. The `bin` is
   still `jev-seo`, so a global install gives a short command.
 - **§1.11 said delete `start.sh` / `stop.sh`.** Wrong call, reverted. They are
   macOS-shaped and `pkill -f vite` does kill unrelated projects, but they are
@@ -235,13 +235,13 @@ Every dependency line is labelled **required** or **optional**. A product whose 
 One process, one port, no required external runtime:
 
 ```
-npx @vakandi/jev-seo                  # start (foreground), prints the URL
-npx @vakandi/jev-seo start --detach   # background, PID + logs in ~/.jev-seo
-npx @vakandi/jev-seo stop             # kill by PID, never by pattern
-npx @vakandi/jev-seo status           # PID / port / /api/health
-npx @vakandi/jev-seo doctor           # preflight, required vs optional
+npx jevseo                  # start (foreground), prints the URL
+npx jevseo start --detach   # background, PID + logs in ~/.jev-seo
+npx jevseo stop             # kill by PID, never by pattern
+npx jevseo status           # PID / port / /api/health
+npx jevseo doctor           # preflight, required vs optional
 
-# after `npm i -g @vakandi/jev-seo` the command is just:
+# after `npm i -g jevseo` the command is just:
 jev-seo doctor
 ```
 
@@ -279,7 +279,7 @@ Everything above is a local build. The only proof is a clean-room install:
 
 ```
 npm pack
-npm i -g ./vakandi-jev-seo-1.0.0.tgz        # or: npx @vakandi/jev-seo@latest
+npm i -g ./vakandi-jev-seo-1.0.0.tgz        # or: npx jevseo@latest
 jev-seo doctor
 jev-seo start --detach
 curl -s localhost:8787/api/health   # read the body
@@ -299,8 +299,11 @@ A 200 with an empty body is a failure. A screenshot is a failure for anything th
 
 ## 5. Decisions — now settled
 
-- **Registry: public npm, scoped `@vakandi`.** The unscoped `jev-seo` was already
-  registered to another user on 2026-09-26, so the scope was forced. Public means
+- **Registry: public npm, unscoped `jevseo`.** The obvious unscoped name
+  `jev-seo` was already registered to another user on 2026-09-26 and has never
+  been published from, so it cannot be released by this project. The package
+  therefore ships as `jevseo` — unscoped, so `npx jevseo` needs no scope
+  ceremony. Public means
   §1.5's "nothing secret in the tree" is a release gate, not a convention — the
   tarball was audited and carries no `.env`, `proxies.txt`, `.gsc`, `server/src`,
   or `.pyc`.
@@ -311,7 +314,7 @@ A 200 with an empty body is a failure. A screenshot is a failure for anything th
 - **`opencode`: optional, never in a `postinstall`.** Pulling a Bun-based CLI
   into an npm lifecycle script is a supply-chain decision that should not be made
   implicitly.
-- **Both install paths.** The README leads with `npx @vakandi/jev-seo`; the
+- **Both install paths.** The README leads with `npx jevseo`; the
   `bin` is unscoped so a global install gives a plain `jev-seo`.
 
 ---

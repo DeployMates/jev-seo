@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>jev-seo — typed judgements on a live crawl</title>
-<meta name="description" content="Audits any business website for SEO and AI-search visibility. Deterministic crawl, narrow typed judgements from the Jev decision model, probabilities streamed as they land.">
+<title>Jev MotherF*Cker Rank Me — typed judgements on a live crawl</title>
+<meta name="description" content="Jev MotherF*Cker Rank Me. Audits any business website for SEO and AI-search visibility. Deterministic crawl, narrow typed judgements from the Jev decision model, probabilities streamed as they land.">
 <meta name="color-scheme" content="light">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b0b0a'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%23ff5a1f'/%3E%3C/svg%3E">
 <style>
@@ -150,7 +150,8 @@ footer a{color:var(--muted)}
       <a href="#run">Run</a>
       <a href="#how">How</a>
       <a href="#docs">Docs</a>
-      <a href="https://www.npmjs.com/package/@vakandi/jev-seo" target="_blank" rel="noopener">npm</a>
+      <a href="https://jev.mfrank.me">Live site</a>
+      <a href="https://www.npmjs.com/package/jevseo" target="_blank" rel="noopener">npm</a>
     </div>
   </div>
 </nav>
@@ -161,13 +162,13 @@ footer a{color:var(--muted)}
       <img src="banner.png" alt="Jev SEO Dashboard — typed judgements on a live crawl" width="1200" height="400">
     </div>
 
-    <h1 class="rv">Typed judgements on a live crawl.</h1>
-    <p class="lede rv">Audits any business website for SEO and AI-search visibility. A deterministic
+    <h1 class="rv">Jev MotherF*Cker Rank Me</h1>
+    <p class="lede rv">Audit any site for SEO and AI-search visibility. A deterministic
     crawl feeds narrow typed questions to the Jev decision model, and the dashboard renders the
     probabilities as they land &mdash; not after the report.</p>
 
     <div class="badges rv">
-      <img src="https://img.shields.io/npm/v/@vakandi/jev-seo?style=flat-square&labelColor=0b0b0a&color=ff5a1f" alt="npm version">
+      <img src="https://img.shields.io/npm/v/jevseo?style=flat-square&labelColor=0b0b0a&color=ff5a1f" alt="npm version">
       <img src="https://img.shields.io/badge/node-%3E%3D20.11-0b0b0a?style=flat-square&logo=node&logoColor=ff5a1f" alt="Node engine">
       <img src="https://img.shields.io/badge/TypeScript-5.7-0b0b0a?style=flat-square&logo=typescript&logoColor=ff5a1f" alt="TypeScript">
       <img src="https://img.shields.io/badge/React-18-0b0b0a?style=flat-square&logo=react&logoColor=ff5a1f" alt="React">
@@ -175,7 +176,7 @@ footer a{color:var(--muted)}
     </div>
 
     <div class="cmd rv">
-      <code id="cmdline"><span class="p">$</span> npx @vakandi/jev-seo</code>
+      <code id="cmdline"><span class="p">$</span> npx jevseo</code>
       <button id="copy" type="button" aria-label="Copy install command">Copy</button>
     </div>
     <p class="rv" style="font-size:13.5px;color:var(--faint);margin-top:11px">
@@ -219,8 +220,8 @@ footer a{color:var(--muted)}
     the API on the same port.</p>
     <div class="grid g2">
       <div class="card rv"><h4><span class="n">1</span>Installed</h4>
-        <p><code>npx @vakandi/jev-seo</code><br>The package is scoped; the command is not.
-        <code>npm i -g @vakandi/jev-seo</code> puts a plain <code>jev-seo</code> on your PATH.</p></div>
+        <p><code>npx jevseo</code><br>The package is scoped; the command is not.
+        <code>npm i -g jevseo</code> puts a plain <code>jev-seo</code> on your PATH.</p></div>
       <div class="card rv"><h4><span class="n">2</span>Lifecycle</h4>
         <p><code>start --detach</code> &middot; <code>status</code> &middot; <code>stop</code> &middot;
         <code>doctor</code><br><code>stop</code> kills by PID from a pid file, never by process name.</p></div>
@@ -331,10 +332,11 @@ footer a{color:var(--muted)}
 
 <footer>
   <div class="wrap">
-    <span>jev-seo &mdash; a DeployMates project.</span>
-    <span>npm package published under <code>@vakandi</code>.</span>
+    <span>Jev MotherF*Cker Rank Me &mdash; a DeployMates project.</span>
+    <a href="https://jev.mfrank.me">jev.mfrank.me</a>
+    <span>npm package <code>jevseo</code>.</span>
     <a href="https://github.com/DeployMates/jev-seo">Source</a>
-    <a href="https://www.npmjs.com/package/@vakandi/jev-seo">npm</a>
+    <a href="https://www.npmjs.com/package/jevseo">npm</a>
   </div>
 </footer>
 
@@ -343,9 +345,9 @@ footer a{color:var(--muted)}
 document.getElementById("copy").addEventListener("click", async (e) => {
   const b = e.currentTarget;
   try {
-    await navigator.clipboard.writeText("npx @vakandi/jev-seo");
+    await navigator.clipboard.writeText("npx jevseo");
     b.textContent = "Copied"; b.classList.add("done");
-  } catch { b.textContent = "npx @vakandi/jev-seo"; }
+  } catch { b.textContent = "npx jevseo"; }
   setTimeout(() => { b.textContent = "Copy"; b.classList.remove("done"); }, 1600);
 });
 

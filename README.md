@@ -1,14 +1,16 @@
 <p align="center">
-  <img src=".assets/banner.png" alt="Jev SEO Dashboard — typed judgements on a live crawl" width="100%">
+  <img src=".assets/banner.png" alt="Jev MotherF*Cker Rank Me — audit any site for SEO and AI-search visibility" width="100%">
 </p>
 
 <p align="center">
-  <strong>Audits any business website for SEO and AI-search visibility.</strong><br>
+  <strong>Jev MotherF\*Cker Rank Me</strong><br>
+  Audit any site for SEO and AI-search visibility.
   Deterministic crawl &rarr; narrow typed judgements from the Jev decision model &rarr; probabilities, streamed as they land.
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/@vakandi/jev-seo"><img src="https://img.shields.io/npm/v/@vakandi/jev-seo?style=flat-square&labelColor=0b0b0a&color=ff5a1f" alt="npm version"></a>
+  <a href="https://jev.mfrank.me"><img src="https://img.shields.io/badge/site-live-ff5a1f?style=flat-square&labelColor=0b0b0a" alt="Live site"></a>
+  <a href="https://www.npmjs.com/package/jevseo"><img src="https://img.shields.io/npm/v/jevseo?style=flat-square&labelColor=0b0b0a&color=ff5a1f" alt="npm version"></a>
   <a href="#run-it"><img src="https://img.shields.io/badge/node-%3E%3D20.11-0b0b0a?style=flat-square&logo=node&logoColor=ff5a1f" alt="Node engine"></a>
   <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-5.7-0b0b0a?style=flat-square&logo=typescript&logoColor=ff5a1f" alt="TypeScript"></a>
   <a href="https://react.dev/"><img src="https://img.shields.io/badge/React-18-0b0b0a?style=flat-square&logo=react&logoColor=ff5a1f" alt="React"></a>
@@ -75,24 +77,24 @@ The full contract, with every trap, is in **[`docs/LAYERS.md`](docs/LAYERS.md)**
 ## Quick start
 
 ```bash
-npx @vakandi/jev-seo
+npx jevseo
 ```
 
 That is the whole install. It prints a URL and serves the dashboard **and** the API on **one port**
 (8787 by default). No clone, no `npm install`, no Python.
 
 ```bash
-npx @vakandi/jev-seo start --detach   # background; survives closing the terminal
-npx @vakandi/jev-seo status           # pid, port, /api/health
-npx @vakandi/jev-seo stop             # stops it; kills by pid, never by process name
-npx @vakandi/jev-seo doctor           # preflight, required vs optional
+npx jevseo start --detach   # background; survives closing the terminal
+npx jevseo status           # pid, port, /api/health
+npx jevseo stop             # stops it; kills by pid, never by process name
+npx jevseo doctor           # preflight, required vs optional
 ```
 
-The package is scoped; the **command is not**. `npm i -g @vakandi/jev-seo` gives you a plain
-`jev-seo` on your PATH, so `jev-seo doctor` works without the `npx @vakandi/` prefix once it is
-installed globally.
+Nothing to type twice. `npx jevseo` runs it, and `npm i -g jevseo` puts a plain
+`jev-seo` on your PATH — so `jev-seo doctor` and `jev-seo stop` work without the `npx` prefix.
+(Unscoped because `jev-seo` itself is already taken on npm; the name is `jevseo`.)
 
-> Upgrading? Run `npx @vakandi/jev-seo stop` first — otherwise the old process keeps holding the
+> Upgrading? Run `npx jevseo stop` first — otherwise the old process keeps holding the
 > port and the new one exits with `port 8787 is already in use`.
 
 ### From a checkout

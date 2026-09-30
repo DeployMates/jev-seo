@@ -10,7 +10,7 @@
 | | |
 |---|---|
 | **Git repository** | `DeployMates/jev-seo` — a **DeployMates** repository. Private. Canonical source of truth. |
-| **npm package** | `@vakandi/jev-seo` — published under the **`vakandi`** account. |
+| **npm package** | `jevseo` — published under the **`vakandi`** account. |
 
 These are deliberately different and **neither is a mistake to be "fixed"**. The code belongs to the
 DeployMates organisation; the npm scope is a personal publishing namespace. Do not propose renaming the
@@ -19,7 +19,7 @@ mismatch as drift to reconcile. Issue trackers, Pages and CI live on the **Deplo
 
 ## OVERVIEW
 
-`@vakandi/jev-seo` (repo: `DeployMates/jev-seo`) — audits any business website for SEO and AI-search
+`jevseo` (repo: `DeployMates/jev-seo`) — audits any business website for SEO and AI-search
 visibility. Deterministic crawl → narrow typed judgements from the **Jev** "System One" model (keyless
 OpenCode Zen gateway) → probabilities surfaced in a React dashboard. Express 4 + Vite 6 + TypeScript,
 shipped prebuilt as a single-port npx CLI. **The rule it is built on: code finds, Jev judges, the
