@@ -3,14 +3,28 @@
 **Generated:** 2026-09-30
 **Commit:** b886731
 **Branch:** main
+**Remote:** `git@github.com:DeployMates/jev-seo.git` → https://github.com/DeployMates/jev-seo (private)
+
+## OWNERSHIP — two identities, both correct
+
+| | |
+|---|---|
+| **Git repository** | `DeployMates/jev-seo` — a **DeployMates** repository. Private. Canonical source of truth. |
+| **npm package** | `@vakandi/jev-seo` — published under the **`vakandi`** account. |
+
+These are deliberately different and **neither is a mistake to be "fixed"**. The code belongs to the
+DeployMates organisation; the npm scope is a personal publishing namespace. Do not propose renaming the
+package to `@deploymates/*`, do not rename the repo to `vakandi/jev-seo`, and do not treat the
+mismatch as drift to reconcile. Issue trackers, Pages and CI live on the **DeployMates** repo.
 
 ## OVERVIEW
 
-`@vakandi/jev-seo` — audits any business website for SEO and AI-search visibility. Deterministic crawl
-→ narrow typed judgements from the **Jev** "System One" model (keyless OpenCode Zen gateway) →
-probabilities surfaced in a React dashboard. Express 4 + Vite 6 + TypeScript, shipped prebuilt as a
-single-port npx CLI. **The rule it is built on: code finds, Jev judges, the dashboard shows the
-probabilities.** An LLM-authored finding is the defining failure mode, not a bug to fix later.
+`@vakandi/jev-seo` (repo: `DeployMates/jev-seo`) — audits any business website for SEO and AI-search
+visibility. Deterministic crawl → narrow typed judgements from the **Jev** "System One" model (keyless
+OpenCode Zen gateway) → probabilities surfaced in a React dashboard. Express 4 + Vite 6 + TypeScript,
+shipped prebuilt as a single-port npx CLI. **The rule it is built on: code finds, Jev judges, the
+dashboard shows the probabilities.** An LLM-authored finding is the defining failure mode, not a bug
+to fix later.
 
 ## STRUCTURE
 
@@ -21,12 +35,15 @@ jev-seo/
 │   └── mcp/gsc-mcp/   # vendored Python MCP (60 Google tools), agent-side only → its own AGENTS.md
 ├── web/               # workspace: React 18 SPA, served as a built bundle  → web/AGENTS.md
 ├── docs/              # 6 design contracts. Read before changing the decision layer.
+├── .assets/           # README assets + the static GitHub Pages site. Tracked; see WHERE TO LOOK.
+├── .github/workflows/ # `pages.yml` publishes `.assets/`. The repo's ONLY workflow — there is no CI.
 ├── start.sh stop.sh   # LEGACY 2-process dev workflow. Not shipped, not the product path.
 └── .mcp.json          # registers the `gsc` Python MCP for the spawned agent
 ```
 
 `server/dist/` and `web/dist/` are generated and untracked. `package.json` `files` ships them —
-the tarball carries **prebuilt output**, because `prepare` never runs on a registry install.
+the tarball carries **prebuilt output**, because `prepare` never runs on a registry install. Note
+`.assets/` is **not** in that allowlist, so the README on npmjs.com renders without its images.
 
 ## WHERE TO LOOK
 
@@ -42,6 +59,8 @@ the tarball carries **prebuilt output**, because `prepare` never runs on a regis
 | Browser → server contract | `web/src/api.ts` | The only API client. NDJSON stream reader, not SSE. |
 | Decision-panel producer | `server/src/decisions.ts` | Contract in `docs/UI-CONTRACT.md`. |
 | Decide "act / review / escalate" | `server/src/thresholds.ts` | `DECISIVE_BY_QUESTION` + friends. Tuned per question. |
+| README images / the static site | `.assets/` | One folder at the root. `index.html` is the Pages site. |
+| Change the Pages deploy | `.github/workflows/pages.yml` | The only workflow. Needs the Pages source set to "GitHub Actions". |
 
 ## CODE MAP
 
@@ -82,6 +101,9 @@ Only what deviates from a standard Node/React project.
 - `noul` (in `questions.ts`) is a real primitive name, not a typo. Renaming it breaks the schema.
 - `tools/` and `server/mcp/` are **not** the npm `tools` bin or an npm script dir. `server/scripts/`
   holds verification harnesses; `server/test/` holds one fixture and **zero** tests.
+- **All README assets live in `.assets/` at the root**, referenced as `./.assets/<file>`. It is
+  tracked (an uncommitted banner is a broken image) and it is where the static Pages site lives.
+  Never scatter assets into `docs/` or a per-feature folder.
 
 ## ANTI-PATTERNS (THIS PROJECT)
 
@@ -177,3 +199,8 @@ hand. `verify-rubric.ts` reads source signatures, so typecheck it first.
   decision panel. `docs/PLAN-agent-research-and-gsc-onboarding.md` is **proposed, not started**.
 - `server/package.json` declares `"types": "dist/index.d.ts"` but `tsconfig.build.json` sets
   `declaration: false`, so no `.d.ts` is emitted. The field is dangling.
+- **GitHub Pages is configured but cannot deploy yet.** `DeployMates` is on the **free** plan, and
+  Pages for a **private** repo needs Pro/Team/Enterprise. `POST /repos/DeployMates/jev-seo/pages`
+  answers `422 Your current plan does not support GitHub Pages for this repository.` The workflow
+  and the site are committed and correct; enabling it needs either an org plan upgrade or a public
+  repo — a decision for the maintainer, not a code change.
