@@ -50,9 +50,11 @@ input, textarea, select { font: inherit; }
 }
 .field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .field.span2 { grid-column: span 2; }
-/* The URL, the manual-mode control and the actions each own a whole row. */
+/* The URL, the manual-mode control, the expanded manual block and the actions each own a whole row.
+   Auto-placed, .manual-fields would land in column 1 and squeeze every field into a quarter. */
 .form > .field.span2:has(.urlrow) { grid-column: 1 / -1; }
 .form > .manualtoggle { grid-column: 1 / -1; }
+.form > .manual-fields { grid-column: 1 / -1; }
 .form > .actions { grid-column: 1 / -1; }
 .field.span4 { grid-column: span 4; }
 .field label {
