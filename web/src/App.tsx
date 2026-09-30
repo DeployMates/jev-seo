@@ -5,6 +5,7 @@ import { GuideTour } from "./GuideTour"
 import { Onboarding, type GscConnection } from "./Onboarding"
 import { type GscCheck } from "./CapacityBadge"
 import { CapacityCluster } from "./CapacityCluster"
+import { PropertyPicker, type GscProperty } from "./PropertyPicker"
 import type { AutofillRun } from "./researchTypes"
 import { SessionBar, type SessionStage, type SessionSummary } from "./SessionBar"
 import { CrawlBar } from "./CrawlBar"
@@ -302,6 +303,14 @@ export default function App() {
   const [autofill, setAutofill] = useState<AutofillRun | null>(null)
   const [tourSignal, setTourSignal] = useState(0)
   const [formOpen, setFormOpen] = useState(true)
+  /**
+   * The rest of the form — business name, market, rivals, budgets — is manual
+   * input, and presearch fills all of it in. So it is hidden behind an explicit
+   * control: someone who pastes a URL and presses presearch should not be shown
+   * six fields they are about to have filled for them, and someone who wants to
+   * override a guess should not have to hunt for the field.
+   */
+  const [manualOpen, setManualOpen] = useState(false)
   const [researching, setResearching] = useState(false)
   const [sessionLog, setSessionLog] = useState<LogLine[]>([])
   const [crawlLog, setCrawlLog] = useState<LogLine[]>([])
@@ -355,7 +364,46 @@ export default function App() {
   const checkGsc = useMemo(
     () => async (url: string) => {
       if (!url.trim()) {
-        setGsc((prev) => ({ ...prev, checked: false, verifying: false, checking: false }))
+        // No URL typed yet, but the key may already be on disk. Asking for the
+        // property list is what makes a refresh reveal it: this check is the only
+        // caller and it used to bail on an empty field, so a correctly installed
+        // key rendered as "not connected" until the user typed something and ran
+        // an audit. The badge is about the connection, not about the last URL.
+        // The server decides: an empty list means no usable key, so there is no
+        // need to read `configured` here and no stale closure to worry about.
+        try {
+          const response = await fetch(`${API}/api/gsc/properties`)
+          const data = (await response.json()) as {
+            properties?: GscProperty[]
+            clientEmail?: string | null
+          }
+          const sites = data.properties ?? []
+          // With no URL to check, the badge must reflect the best access this key
+          // has to *any* property, not whichever one the API listed first: a key
+          // that is Owner on one site and Full on another would render as the
+          // weaker grant and claim reduced capacity while the strong one sits
+          // unused in the same list.
+          const rank: Record<string, number> = {
+            siteOwner: 3,
+            siteFullUser: 2,
+            siteRestrictedUser: 1,
+          }
+          const best = [...sites].sort(
+            (a, b) => (rank[b.permissionLevel] ?? 0) - (rank[a.permissionLevel] ?? 0),
+          )[0]
+          setGsc((prev) => ({
+            ...prev,
+            configured: sites.length > 0,
+            verified: sites.length > 0,
+            permission: (best?.permissionLevel ?? null) as GscCheck["permission"],
+            property: prev.property ?? best?.siteUrl ?? null,
+            clientEmail: prev.clientEmail ?? data.clientEmail ?? null,
+            checked: sites.length > 0,
+            checking: false,
+          }))
+        } catch {
+          setGsc((prev) => ({ ...prev, checked: false, verifying: false, checking: false }))
+        }
         return
       }
       setGsc((prev) => ({ ...prev, checking: true, error: null }))
@@ -494,6 +542,11 @@ export default function App() {
             } else if (event.kind === "tool") {
               setSessionStage("search")
               ss(`— ${event.tool} ${event.status}`)
+            } else if (event.kind === "reasoning") {
+              // Prefixed so the log stays readable: the model thinking is not the
+              // same class of line as what it wrote back, and the distinction is
+              // what tells a run that is reasoning from one that has stalled.
+              ss(`· ${(event.text ?? "").slice(0, 160)}`, "warn")
             } else if (event.kind === "text") {
               setSessionStage("write")
               ss(`— ${(event.text ?? "").slice(0, 160)}`)
@@ -528,6 +581,8 @@ export default function App() {
           competitors: rivals.length,
           seeds: seeds.length,
           degraded: false,
+          aiTools: receipt?.aiTools ?? 0,
+          aiMsgs: receipt?.aiMsgs ?? 0,
         })
 
         applyAutofill({
@@ -548,6 +603,8 @@ export default function App() {
           competitors: 0,
           seeds: 0,
           degraded: true,
+          aiTools: result.receipt?.aiTools ?? 0,
+          aiMsgs: result.receipt?.aiMsgs ?? 0,
           reason: result.reason ?? undefined,
         })
         ss(`✕ presearch degraded: ${result.reason ?? "unknown reason"} — your own values are kept`, "bad")
@@ -965,6 +1022,9 @@ export default function App() {
             url={form.url}
             onOpenOnboarding={() => setOnboardingOpen(true)}
             onRecheck={() => void checkGsc(form.url)}
+            onAgentModelChanged={(model) =>
+              setConfig((prev) => (prev ? { ...prev, agentModel: model } : prev))
+            }
           />
         )}
       </div>
@@ -1032,18 +1092,44 @@ export default function App() {
           </svg>
         </button>
         <div className="field span2">
-          <label htmlFor="url">Website URL</label>
-          <input
-            id="url"
-            type="text"
-            placeholder="https://trustmrr.com/"
-            value={form.url}
-            onChange={(e) => setForm({ ...form, url: e.target.value })}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void start()
-            }}
-          />
+          <div className="urlrow">
+            <div className="urlgrow">
+              <label htmlFor="url">Website URL</label>
+              <input
+                id="url"
+                type="text"
+                placeholder="https://trustmrr.com/"
+                value={form.url}
+                onChange={(e) => setForm({ ...form, url: e.target.value })}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void start()
+                }}
+              />
+            </div>
+            <PropertyPicker
+              onPick={(url) => {
+                setForm((prev) => ({ ...prev, url }))
+                void checkGsc(url)
+              }}
+            />
+          </div>
         </div>
+
+        <button
+          type="button"
+          className={`manualtoggle${manualOpen ? " open" : ""}`}
+          onClick={() => setManualOpen((v) => !v)}
+          aria-expanded={manualOpen}
+          aria-controls="manual-fields"
+        >
+          <span>{manualOpen ? "Hide manual fields" : "Fill it in myself"}</span>
+          <svg width="11" height="11" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M18 15l-6-6-6 6" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+
+        {manualOpen && (
+        <div className="manual-fields" id="manual-fields">
         <div className="field">
           <label htmlFor="name">Business name</label>
           <input
@@ -1164,6 +1250,8 @@ export default function App() {
           />
           <label htmlFor="runjev">Use Jev</label>
         </div>
+        </div>
+        )}
         <div className="actions" data-tour="run">
           <button
             className="primary"

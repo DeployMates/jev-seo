@@ -38,7 +38,7 @@ jev-seo/
 ├── .assets/           # README assets + the static GitHub Pages site. Tracked; see WHERE TO LOOK.
 ├── .github/workflows/ # `pages.yml` publishes `.assets/`. The repo's ONLY workflow — there is no CI.
 ├── start.sh stop.sh   # LEGACY 2-process dev workflow. Not shipped, not the product path.
-└── .mcp.json          # registers the `gsc` Python MCP for the spawned agent
+└── .mcp.json          # registers the `gsc` Python MCP — dev-from-checkout only (see ANTI-PATTERNS 13)
 ```
 
 `server/dist/` and `web/dist/` are generated and untracked. `package.json` `files` ships them —
@@ -136,7 +136,17 @@ Verbatim prohibitions, with authority.
     does not exist is *worse* than a missing one: the prompt advertises it and gate 3a then fails the
     whole run. Note `buildToolAllowlist` (`agent.ts:93`) grants the whole `gsc` namespace on
     `verified` alone, without checking permission — and that namespace includes destructive writers.
-12. **Never reorder `crawl.ts:707`** — the JSON-LD count must precede the `remove()` strip below it,
+12. **The spawned agent resolves no config but the one this project generates.**
+    `agent.ts` sets `OPENCODE_CONFIG_DIR` to `PROJECT_DIR` on every `spawn`, and `paths.ts`
+    writes `opencode.json` (permissions) plus `.mcp.json` (servers) into `~/.jev-seo/agent`.
+    Drop that env var and the child silently loads the operator's global
+    `~/.config/opencode/opencode.json` — their MCP servers, their agents, their provider keys —
+    and a research run on a stranger's site inherits all of it. The repo-root `.mcp.json` is the
+    dev-from-checkout path only; its `run.sh` argument is **relative**, so it cannot work from
+    `~/.jev-seo/agent` and must never be the config the child resolves. The permission block is
+    rewritten per run by `writeAgentPermissions` because its one allowed write target is an
+    absolute path chosen at call time — a constant cannot name it.
+13. **Never reorder `crawl.ts:707`** — the JSON-LD count must precede the `remove()` strip below it,
     or structured-data detection silently returns 0.
 
 ## UNIQUE STYLES

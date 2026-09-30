@@ -19,6 +19,9 @@ export interface SessionSummary {
   seeds: number
   degraded: boolean
   reason?: string
+  /** Counted off the live stream, so they move during the run and not only after it. */
+  aiTools?: number
+  aiMsgs?: number
 }
 
 interface Props {
@@ -43,6 +46,14 @@ export function SessionBar({ stage, running, hasRun, log, summary, queued }: Pro
   const [open, setOpen] = useState(false)
   const liveSearches = log.filter((l) => /^— \S+ (completed|error|pending)/.test(l.text)).length
   const searches = summary?.toolsCalled ?? liveSearches
+  // Two different things, and deliberately not one: a tool call is the agent
+  // reaching out, an AI message is the model writing back. Counting them from the
+  // same stream means the banner shows a stalled run as stalled rather than
+  // inferring activity from the elapsed timer.
+  const liveTools = log.filter((l) => /^— \S+ (completed|running|pending|error)$/.test(l.text)).length
+  const liveMsgs = log.filter((l) => l.text.startsWith("— ") && !/^— \S+ (completed|running|pending|error)$/.test(l.text)).length
+  const aiTools = summary?.aiTools ?? liveTools
+  const aiMsgs = summary?.aiMsgs ?? liveMsgs
   const logRef = useRef<HTMLDivElement>(null)
   const activeIndex = Math.max(0, ORDER.indexOf(stage))
 
@@ -90,6 +101,12 @@ export function SessionBar({ stage, running, hasRun, log, summary, queued }: Pro
           </span>
           <span className="stat">
             <b>{searches}</b> searches
+          </span>
+          <span className="stat" title="Tool calls the agent made">
+            <b>{aiTools}</b> AI tools
+          </span>
+          <span className="stat" title="Messages the model wrote back">
+            <b>{aiMsgs}</b> AI msgs
           </span>
           {summary ? (
             <span className="stat">

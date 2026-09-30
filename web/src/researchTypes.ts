@@ -59,6 +59,9 @@ export interface ResearchReceipt {
   promptVariant: "A" | "B" | null
   grantedTools: string[]
   toolsCalled: ResearchToolCall[]
+  /** Stream counts, so the presearch banner can show them live and not only at the end. */
+  aiTools?: number
+  aiMsgs?: number
 }
 
 export interface ResearchPayload {

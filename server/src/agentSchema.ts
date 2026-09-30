@@ -158,6 +158,14 @@ export interface AgentReceipt {
   inputTokens: number
   outputTokens: number
   sessionId: string | null
+  /**
+   * Message-part count the stream produced, split by kind. `tools` is the tool
+   * calls that actually ran; `messages` is the model's own turns. They are kept
+   * apart because "the session made 12 calls" and "the model wrote 4 replies" are
+   * different facts, and a stalled run is visible as the gap between them.
+   */
+  aiTools: number
+  aiMsgs: number
   /** The one-line validation error that caused a retry, if there was one. */
   retryReason: string | null
 }

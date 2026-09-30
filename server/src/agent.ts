@@ -27,9 +27,10 @@
  * - **Every number is traceable to a tool call that happened.** A figure
  *   naming a tool that never ran is a validation failure, not a caveat.
  */
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { isAbsolute, resolve } from "node:path"
 import { agentWorkspaceDir, researchDir, agentMcpServers, agentPermission, writeAgentPermissions } from "./paths.js"
+import { ZEN_BASE_URL, zenHeaders, zenKey } from "./config.js"
 import {
   CRAWL_ONLY_OUTPUT,
   ResearchOutputSchema,
@@ -230,10 +231,16 @@ interface Transcript {
   inputTokens: number
   outputTokens: number
   costUsd: number
+  /** Every tool part the stream carried, whether or not it is a permitted one. */
+  aiTools: number
+  /** Every model-authored part: text, reasoning, or a step marker. */
+  aiMsgs: number
 }
 
 const EMPTY_TRANSCRIPT: Transcript = {
   text: "",
+  aiTools: 0,
+  aiMsgs: 0,
   toolCalls: [],
   sessionId: null,
   inputTokens: 0,
@@ -565,8 +572,73 @@ function probeBinary(): boolean {
   return false
 }
 
+/**
+ * The model the next run uses. A module const would freeze the first choice for
+ * the life of the process, so the dashboard's dropdown could never take effect
+ * without a restart; `AGENT_MODEL` remains the default this falls back to.
+ */
+let selectedAgentModel: string | null = null
+
 export function activeAgentModel(): string {
-  return AGENT_MODEL
+  return selectedAgentModel ?? AGENT_MODEL
+}
+
+interface AgentModelFile {
+  model?: string
+}
+
+/**
+ * Persist the chosen model outside the install directory. Under `npx` that
+ * directory is a cache npm garbage-collects, so a choice stored there would come
+ * back as the default after a reinstall with no warning.
+ */
+function agentModelPath(): string {
+  return resolve(agentWorkspaceDir(), "model.json")
+}
+
+export function setAgentModel(model: string): { ok: true; model: string } {
+  selectedAgentModel = model
+  try {
+    writeFileSync(agentModelPath(), `${JSON.stringify({ model }, null, 2)}\n`, "utf8")
+  } catch {
+    /* a read-only data dir is reported by probeWritable at boot */
+  }
+  return { ok: true, model }
+}
+
+/** Read the persisted choice once at boot. A malformed file is not an error. */
+function loadAgentModel(): void {
+  try {
+    const parsed = JSON.parse(readFileSync(agentModelPath(), "utf8")) as AgentModelFile
+    if (typeof parsed.model === "string" && parsed.model.trim().length > 0) {
+      selectedAgentModel = parsed.model.trim()
+    }
+  } catch {
+    /* no stored choice, or an unreadable one: the default stands */
+  }
+}
+loadAgentModel()
+
+/**
+ * Every model the Zen gateway advertises, so the dashboard can offer the real
+ * list instead of a hard-coded one. The same keyless credential the judge uses:
+ * Zen serves its catalogue without one.
+ */
+export async function listAgentModels(): Promise<string[]> {
+  const response = await fetch(`${ZEN_BASE_URL}/models`, {
+    headers: zenHeaders(zenKey() ?? "public"),
+    signal: AbortSignal.timeout(15_000),
+  })
+  if (!response.ok) {
+    throw new Error(`Zen model list failed with ${response.status}`)
+  }
+  const payload = (await response.json()) as { data?: unknown; models?: unknown }
+  const raw = payload.data ?? payload.models ?? []
+  if (!Array.isArray(raw)) return []
+  const ids = raw
+    .map((entry) => (typeof entry === "string" ? entry : (entry as { id?: unknown })?.id))
+    .filter((id): id is string => typeof id === "string" && id.length > 0)
+  return [...new Set(ids)].sort()
 }
 
 /**
@@ -576,9 +648,10 @@ export function activeAgentModel(): string {
  * the run degrades for a reason that never appears in the log.
  */
 function modelRef(): { providerID: string; modelID: string } {
-  const at = AGENT_MODEL.indexOf("/")
-  if (at < 0) return { providerID: "opencode", modelID: AGENT_MODEL }
-  return { providerID: AGENT_MODEL.slice(0, at), modelID: AGENT_MODEL.slice(at + 1) }
+  const model = activeAgentModel()
+  const at = model.indexOf("/")
+  if (at < 0) return { providerID: "opencode", modelID: model }
+  return { providerID: model.slice(0, at), modelID: model.slice(at + 1) }
 }
 
 class RunFailure extends Error {
@@ -589,7 +662,7 @@ class RunFailure extends Error {
 }
 
 export interface AgentEvent {
-  kind: "session" | "tool" | "text" | "retry"
+  kind: "session" | "tool" | "text" | "reasoning" | "retry"
   tool?: string
   status?: string
   text?: string
@@ -660,6 +733,7 @@ async function runOpencodeSdk(
       // the turn is queued, so reading the session straight after it returns
       // finds an empty transcript and degrades a run that is still working.
       const events = (await client.event.subscribe({ signal: controller.signal })).stream
+      const reasonedParts = new Set<string>()
       let idle = false
       let signalIdle: () => void = () => {}
       const idlePromise = new Promise<void>((r) => {
@@ -701,6 +775,29 @@ async function runOpencodeSdk(
             }
             const part = props?.part as Record<string, unknown> | undefined
             if (!part || typeof part !== "object") continue
+            // Counted before the type is filtered: a run that spends ten steps on
+            // a part this client does not render is still a run that is working,
+            // and a counter that only sees known parts would call it idle.
+            if (part.type === "tool") transcript.aiTools += 1
+            else transcript.aiMsgs += 1
+            if (part.type === "reasoning") {
+              // Streamed: the same part is re-sent as tokens land, so it is shown
+              // once per part id. Without that the log fills with a near-identical
+              // line per token and the reasoning becomes unreadable — the opposite
+              // of livestreaming. Counting already happened above, so a part that
+              // only ever arrives empty is still counted.
+              const partId = typeof part.id === "string" ? part.id : null
+              const thought = (part.text ?? part.reasoning ?? "") as string
+              if (
+                typeof thought === "string" &&
+                thought.trim() &&
+                (!partId || !reasonedParts.has(partId))
+              ) {
+                if (partId) reasonedParts.add(partId)
+                onEvent?.({ kind: "reasoning", text: thought.trim().slice(0, 240) })
+              }
+              continue
+            }
             if (part.type === "tool") {
               const state = (part.state ?? {}) as Record<string, unknown>
               const status = String(state.status ?? "unknown")
@@ -807,6 +904,8 @@ function baseReceipt(
     inputTokens: transcript.inputTokens,
     outputTokens: transcript.outputTokens,
     sessionId: transcript.sessionId,
+    aiTools: transcript.aiTools,
+    aiMsgs: transcript.aiMsgs,
     retryReason,
   }
 }

@@ -8,6 +8,7 @@ import {
   type GscCheck,
 } from "./CapacityBadge"
 import type { ServerConfig } from "./api"
+import { ModelPicker } from "./ModelPicker"
 import "./capacity.css"
 
 /* ──────────────────────────────────────────────────────────────
@@ -50,6 +51,8 @@ export interface CapacityClusterProps {
   url: string
   onOpenOnboarding: () => void
   onRecheck: () => void
+  /** A new model was chosen server-side; the badge has to show it immediately. */
+  onAgentModelChanged: (model: string) => void
 }
 
 /* ── one layer, as an icon. Never the full chip: that is in the panel. ── */
@@ -73,6 +76,7 @@ export function CapacityCluster({
   url,
   onOpenOnboarding,
   onRecheck,
+  onAgentModelChanged,
 }: CapacityClusterProps) {
   const report = deriveCapacity({
     jevConfigured: config.jevConfigured,
@@ -338,7 +342,11 @@ export function CapacityCluster({
             </span>
             <span>{missingLabel}</span>
             {gsc.verified && gsc.property && <span>Property <b>{gsc.property}</b></span>}
-            {config.agentModel && <span>Agent <b>{config.agentModel}</b></span>}
+            {config.agentModel && (
+              <span className="capx-agentmodel">
+                Agent <ModelPicker current={config.agentModel} onChanged={onAgentModelChanged} />
+              </span>
+            )}
           </div>
         </div>
       )}

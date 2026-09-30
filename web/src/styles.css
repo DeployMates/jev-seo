@@ -50,6 +50,10 @@ input, textarea, select { font: inherit; }
 }
 .field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .field.span2 { grid-column: span 2; }
+/* The URL, the manual-mode control and the actions each own a whole row. */
+.form > .field.span2:has(.urlrow) { grid-column: 1 / -1; }
+.form > .manualtoggle { grid-column: 1 / -1; }
+.form > .actions { grid-column: 1 / -1; }
 .field.span4 { grid-column: span 4; }
 .field label {
   font: 10.5px/1 var(--mono); text-transform: uppercase; letter-spacing: 0.1em; color: var(--dim);
@@ -429,3 +433,75 @@ button.ghost {
 
 .loop { margin: 0; padding-left: 18px; font-size: 12px; color: var(--muted); line-height: 1.75; }
 .loop b { color: var(--ink); font-weight: 600; }
+
+/* The URL row: the only field visible by default, so it takes the full width. */
+.urlrow { display: flex; gap: 10px; align-items: flex-end; }
+.urlgrow { display: flex; flex-direction: column; gap: 5px; min-width: 0; flex: 1 1 auto; }
+
+/* Manual mode is opt-in, so its control is a full-width quiet row rather than a
+   button that competes with the two primary actions below it. */
+.manualtoggle {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: 100%; cursor: pointer; padding: 9px 12px; border-radius: var(--radius);
+  border: 1px dashed var(--line); background: transparent;
+  color: var(--muted); font-size: 12px;
+}
+.manualtoggle:hover { border-color: var(--dim); color: var(--ink); }
+.manualtoggle svg { transition: transform 0.15s ease; }
+.manualtoggle.open { border-style: solid; }
+.manualtoggle.open svg { transform: rotate(180deg); }
+
+.manual-fields {
+  display: grid; gap: 12px; grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding-top: 4px;
+}
+.manual-fields .span2 { grid-column: span 2; }
+.manual-fields .span4 { grid-column: span 4; }
+
+.picker { position: relative; flex: 0 0 auto; padding-bottom: 1px; }
+.picker-trigger {
+  display: flex; align-items: center; gap: 7px; cursor: pointer;
+  height: 38px; padding: 0 11px; border-radius: var(--radius);
+  border: 1px solid var(--line); background: var(--paper);
+  color: var(--ink); font-size: 12px; white-space: nowrap;
+}
+.picker-trigger:hover { border-color: var(--dim); }
+.picker-count {
+  display: inline-grid; place-items: center; min-width: 18px; height: 18px;
+  padding: 0 5px; border-radius: 9px; background: var(--ink); color: var(--bg);
+  font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums;
+}
+.picker-label { color: var(--muted); }
+
+.picker-panel {
+  position: absolute; top: calc(100% + 5px); right: 0; z-index: 40; width: 340px;
+  padding: 6px; border-radius: var(--radius); border: 1px solid var(--line);
+  background: var(--paper); box-shadow: 0 10px 28px rgb(11 11 10 / 14%);
+}
+.picker-account {
+  display: flex; gap: 7px; align-items: baseline; margin: 0 0 5px;
+  padding: 6px 8px; border-bottom: 1px solid var(--line);
+  font-size: 11px; color: var(--dim);
+}
+.picker-account-v {
+  font-family: var(--mono); font-size: 10px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left;
+}
+.picker-list { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow-y: auto; }
+.picker-row {
+  display: flex; align-items: center; gap: 9px; width: 100%; cursor: pointer;
+  padding: 7px 8px; border: 0; border-radius: var(--radius);
+  background: transparent; color: var(--ink); text-align: left; font-size: 12px;
+}
+.picker-row:hover { background: var(--bg); }
+.picker-fav { flex: 0 0 auto; border-radius: 2px; }
+.picker-host {
+  flex: 1 1 auto; min-width: 0; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.picker-perm {
+  flex: 0 0 auto; padding: 2px 6px; border-radius: 3px;
+  background: var(--bg); color: var(--muted); font-size: 10px;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.picker-perm.no { background: var(--hot-soft); color: var(--hot); }

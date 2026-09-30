@@ -31,12 +31,15 @@ import {
   connectServiceAccount,
   isConfigured as gscConfigured,
   listProperties,
+  readStoredPublicInfo,
   normaliseSiteUrl,
   status as gscStatus,
 } from "./gsc.js"
 import {
   activeAgentModel,
   isAgentAvailable,
+  listAgentModels,
+  setAgentModel,
   runResearch,
   type ResearchRequest,
 } from "./agent.js"
@@ -78,11 +81,39 @@ app.get("/api/config", (_req, res) => {
   })
 })
 
+app.get("/api/agent/models", (_req, res) => {
+  void listAgentModels()
+    .then((models: string[]) => res.json({ models, selected: activeAgentModel() }))
+    .catch((error: unknown) =>
+      res.json({ models: [], selected: activeAgentModel(), error: (error as Error).message }),
+    )
+})
+
+app.post("/api/agent/model", (req, res) => {
+  const body = (req.body ?? {}) as { model?: unknown }
+  if (typeof body.model !== "string" || body.model.trim().length === 0) {
+    res.status(400).json({ error: "A model id is required." })
+    return
+  }
+  res.json(setAgentModel(body.model.trim()))
+})
+
 app.get("/api/gsc/properties", (_req, res) => {
   void listProperties()
-    .then((properties) => res.json({ properties }))
+    .then(async (properties) => {
+      // The account the key belongs to, so the UI can name which identity these
+      // properties are reachable through. Read from the key itself rather than
+      // carried on each property: one key, one account, N properties.
+      let clientEmail: string | null = null
+      try {
+        clientEmail = (await readStoredPublicInfo())?.clientEmail ?? null
+      } catch {
+        /* properties answered, identity did not — the list is still useful */
+      }
+      res.json({ properties, clientEmail })
+    })
     .catch((error: unknown) =>
-      res.json({ properties: [], error: (error as Error).message }),
+      res.json({ properties: [], clientEmail: null, error: (error as Error).message }),
     )
 })
 

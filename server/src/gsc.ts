@@ -481,7 +481,12 @@ export async function status(url: string): Promise<GscStatus> {
   }
 }
 
-async function readStoredPublicInfo(): Promise<GscPublicInfo | null> {
+/**
+ * The connected account's public identity, or `null` when no usable key is on
+ * disk. Exported so the properties route can name the identity its list is
+ * reachable through without parsing the key a second time.
+ */
+export async function readStoredPublicInfo(): Promise<GscPublicInfo | null> {
   const stored = readJson(serviceAccountPath())
   if (!isRecord(stored)) return null
   try {

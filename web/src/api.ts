@@ -150,7 +150,7 @@ export type ResearchEvent =
     }
   | {
       type: "session"
-      kind: "session" | "tool" | "text" | "retry"
+      kind: "session" | "tool" | "text" | "reasoning" | "retry"
       tool?: string
       status?: string
       text?: string
