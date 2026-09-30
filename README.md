@@ -141,8 +141,11 @@ Optional, and reported as optional by `doctor`:
 - **`opencode`** — only for `/api/research` (the deep-research button). An audit runs fully without it.
 - **`uv` / Python 3.11+** — only for the agent-side Search Console tools. The audit path mints its
   own JWT with `node:crypto` and calls Google's REST API directly, so it never touches Python.
-- **A GCP service account** — only to read Search Console. Without one the audit still works on any
-  public URL; it just says GSC is not connected.
+- **A GCP service account** — the key that lets the agent reach Search Console. Without one the
+  `gsc` MCP tool is never granted, so the agent cannot pull real traffic or keyword data for the
+  site and the research pass degrades to crawl-only. The audit still runs on any public URL, but its
+  keyword judgements then come from mining the site's own text, with no real-search evidence behind
+  them.
 
 ---
 

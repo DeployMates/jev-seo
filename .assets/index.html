@@ -228,8 +228,10 @@ footer a{color:var(--muted)}
         <p><code>npm install</code> &middot; <code>npm run dev</code><br>
         Dev is two ports with HMR: Vite 5173 + API 8787. Production is one.</p></div>
       <div class="card rv"><h4><span class="n">4</span>Optional only</h4>
-        <p><code>opencode</code> for deep research &middot; <code>uv</code>/Python for agent-side
-        Search Console &middot; a GCP service account to read GSC. An audit runs without all three.</p></div>
+        <p><code>opencode</code> for deep research &middot; <code>uv</code>/Python for the MCP &middot;
+        a GCP service account for Search Console. Without that key the agent is never granted the
+        <code>gsc</code> tool, so it cannot source real traffic or keyword data &mdash; the audit
+        still runs, on on-page mining alone.</p></div>
     </div>
   </div>
 </section>
