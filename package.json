@@ -1,0 +1,53 @@
+{
+  "name": "@vakandi/jev-seo",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Audit any business website for SEO and AI-search visibility. Typed judgements on a live crawl, streamed as they land.",
+  "license": "UNLICENSED",
+  "keywords": [
+    "seo",
+    "audit",
+    "ai-search",
+    "geo",
+    "search-console",
+    "dashboard"
+  ],
+  "bin": {
+    "jev-seo": "bin/jev-seo.js"
+  },
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "engines": {
+    "node": ">=20.11"
+  },
+  "files": [
+    "bin/",
+    "server/dist/",
+    "server/package.json",
+    "web/dist/",
+    "README.md"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,web -c cyan,magenta \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "npm --workspace server run dev",
+    "dev:web": "npm --workspace web run dev",
+    "build": "npm --workspace server run build && npm --workspace web run build",
+    "start": "node bin/jev-seo.js start",
+    "doctor": "node bin/jev-seo.js doctor",
+    "typecheck": "npm --workspace server run typecheck && npm --workspace web run typecheck",
+    "verify": "npm --workspace server run verify",
+    "prepare": "npm run build",
+    "prepublishOnly": "npm run build && npm run verify"
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

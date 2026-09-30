@@ -1,0 +1,10 @@
+# Vendored MCP server — build/runtime noise and local secrets only.
+__pycache__/
+*.py[co]
+.venv/
+node_modules/
+.env
+.env.local
+sites.json
+service-account*.json
+*.log

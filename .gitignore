@@ -1,0 +1,30 @@
+# Secrets and local state — never commit
+.env
+.env.*
+!.env.example
+.gsc/
+mcp/gsc-mcp/.env
+*.pem
+*service-account*.json
+token*.json
+sites.json
+
+# Build and runtime
+node_modules/
+dist/
+.logs/
+.DS_Store
+*.log
+*.tgz
+jev-seo-reports/
+
+# opencode session state — machine-local, thousands of files
+.omo/
+**/.omo/
+
+# Python bytecode from the vendored MCP (never belongs in a JS repo)
+__pycache__/
+*.py[cod]
+
+# proxies.txt — local only, never commit
+proxies.txt

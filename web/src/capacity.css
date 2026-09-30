@@ -1,0 +1,545 @@
+/* ──────────────────────────────────────────────────────────────
+   capacity.css — CapacityBadge + AutofillPanel
+
+   Every colour, radius and font here comes from a token declared in
+   styles.css. No new palette is introduced: this file must sit next
+   to the counter strip and the reference frames without a seam.
+
+   The structural match is `.counters` / `.counter` — a hairline grid
+   of paper cells on a 1px rule. The structural tone is editorial:
+   mono micro-labels, uppercase, tight tracking, no shadows, 4px radii.
+   ────────────────────────────────────────────────────────────── */
+
+/* ══ CapacityBadge ═══════════════════════════════════════════ */
+
+.cap {
+  position: relative;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  margin: 0 0 14px;
+  overflow: hidden;
+}
+
+/* The rail is the state. Readable from across the room, and it costs
+   one border rather than a background wash. */
+.cap::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--dim);
+}
+.cap.full::before { background: var(--ok); }
+.cap.reduced::before { background: var(--warn); }
+.cap.crawl::before { background: var(--hot); }
+.cap.none::before { background: var(--muted); }
+.cap.checking::before {
+  background: var(--line);
+  animation: cap-pulse 1.4s ease-in-out infinite;
+}
+@keyframes cap-pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.35 } }
+
+.cap-main {
+  display: flex;
+  align-items: center;
+  gap: 12px 14px;
+  flex-wrap: wrap;
+  padding: 11px 14px 11px 17px;
+  min-width: 0;
+}
+
+.cap-id { display: flex; align-items: baseline; gap: 9px; min-width: 0; }
+
+.cap-kicker {
+  font: 10.5px/1 var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.11em;
+  color: var(--dim);
+  flex: 0 0 auto;
+}
+
+.cap-state {
+  font: 700 12px/1 var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  white-space: nowrap;
+}
+.cap.full .cap-state { color: var(--ok); }
+.cap.reduced .cap-state { color: var(--warn); }
+.cap.crawl .cap-state { color: var(--hot); }
+.cap.none .cap-state { color: var(--muted); }
+
+/* The three checks, always all three. A capacity claim the reader
+   cannot audit is a decoration, so none of them is ever hidden. */
+.cap-checks { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+
+.cap-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font: 10.5px/1 var(--mono);
+  padding: 4px 7px;
+  border-radius: 2px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.cap-check .k { color: var(--dim); }
+.cap-check .m { font-weight: 700; letter-spacing: 0.04em; }
+.cap-check.on { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 38%, var(--line)); }
+.cap-check.on .k { color: color-mix(in srgb, var(--ok) 65%, var(--muted)); }
+.cap-check.off { color: var(--hot); border-color: color-mix(in srgb, var(--hot) 38%, var(--line)); }
+.cap-check.half { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); }
+.cap-check.unknown { color: var(--dim); }
+.cap-check .spin {
+  width: 6px; height: 6px; border-radius: 50%;
+  border: 1.5px solid var(--dim); border-top-color: transparent;
+  animation: cap-spin 0.7s linear infinite;
+}
+@keyframes cap-spin { to { transform: rotate(360deg) } }
+
+.cap-why {
+  flex: 1 1 260px;
+  min-width: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.cap-why b { color: var(--ink); font-weight: 600; }
+
+.cap-acts { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+
+.cap-btn {
+  font: 10.5px/1 var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  padding: 6px 10px;
+  border-radius: 2px;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+  white-space: nowrap;
+  transition: opacity 0.15s ease;
+}
+.cap-btn:hover { opacity: 0.85; }
+.cap-btn.quiet { background: transparent; color: var(--muted); border-color: var(--line); }
+.cap-btn.quiet:hover { color: var(--ink); border-color: var(--ink); opacity: 1; }
+.cap-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── the detail: one row per missing piece, each with its fix ── */
+
+.cap-gaps {
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+  padding: 4px 14px 4px 17px;
+}
+
+.cap-gap {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 0;
+  flex-wrap: wrap;
+}
+.cap-gap + .cap-gap { border-top: 1px dashed var(--line); }
+
+.cap-gapbody { flex: 1 1 320px; min-width: 0; }
+.cap-gapt {
+  font: 10.5px/1 var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink);
+  font-weight: 700;
+}
+.cap-gapd { font-size: 12px; line-height: 1.5; color: var(--muted); margin-top: 4px; }
+.cap-gapd code {
+  font: 11px/1 var(--mono);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  padding: 1px 4px;
+}
+
+.cap-fix { display: flex; align-items: center; gap: 7px; flex: 0 0 auto; margin-left: auto; }
+
+/* A fix the user cannot execute in one click is a copyable command
+   instead of a button. Never a dead link. */
+.cap-cmd {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  padding: 4px 5px 4px 8px;
+  max-width: 100%;
+}
+.cap-cmd code {
+  font: 11px/1.35 var(--mono);
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cap-cmd button {
+  flex: 0 0 auto;
+  font: 9.5px/1 var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  padding: 4px 6px;
+  border-radius: 2px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--muted);
+}
+.cap-cmd button:hover { color: var(--ink); border-color: var(--ink); }
+.cap-cmd button.done { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, var(--line)); }
+
+.cap-foot {
+  border-top: 1px solid var(--line);
+  padding: 8px 14px 8px 17px;
+  font: 10.5px/1.5 var(--mono);
+  color: var(--dim);
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.cap-foot b { color: var(--muted); font-weight: 700; }
+
+@media (max-width: 900px) {
+  .cap-main { align-items: flex-start; }
+  .cap-acts { margin-left: 0; width: 100%; }
+  .cap-btn { flex: 1 1 auto; text-align: center; }
+  .cap-fix { margin-left: 0; width: 100%; }
+  .cap-cmd { width: 100%; }
+  .cap-cmd code { white-space: normal; word-break: break-all; }
+}
+
+/* ══ AutofillPanel ══════════════════════════════════════════ */
+
+.af {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.af.editable { border-color: var(--hot); }
+
+.af-head {
+  display: flex;
+  align-items: center;
+  gap: 10px 12px;
+  flex-wrap: wrap;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.af-headtext { min-width: 0; flex: 1 1 260px; }
+.af-kicker {
+  font: 10.5px/1 var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.11em;
+  color: var(--dim);
+}
+.af-title {
+  font: 700 15px/1.2 var(--mono);
+  letter-spacing: -0.01em;
+  margin-top: 5px;
+}
+.af-sub { font-size: 12px; line-height: 1.5; color: var(--muted); margin-top: 5px; }
+
+/* Which prompt ran, and why. The plan makes this a hard requirement:
+   Prompt B has no first-party data, and the user must see that. */
+.af-variant {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 10.5px/1 var(--mono);
+  padding: 5px 8px;
+  border-radius: 2px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.af-variant.A { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 38%, var(--line)); }
+.af-variant.B { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); }
+.af-variant b { font-weight: 700; }
+
+.af-receipt {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+  font: 10.5px/1.4 var(--mono);
+  color: var(--dim);
+}
+.af-receipt b { color: var(--muted); font-weight: 700; }
+.af-receipt .flag { color: var(--warn); }
+
+.af-degrade {
+  display: flex;
+  gap: 9px;
+  padding: 10px 14px;
+  background: #fdf3dc;
+  border-bottom: 1px solid var(--line);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+.af-degrade .mk {
+  flex: 0 0 auto;
+  font: 700 10.5px/1 var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--warn);
+  padding-top: 3px;
+}
+.af-degrade p { margin: 0; }
+.af-degrade p + p { margin-top: 4px; color: var(--muted); }
+
+.af-body { padding: 4px 14px 2px; }
+
+/* ── one field, with the tool that produced its value ── */
+
+.af-field { padding: 12px 0; }
+.af-field + .af-field { border-top: 1px dashed var(--line); }
+
+.af-flabel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.af-flabel label {
+  font: 10.5px/1 var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  font-weight: 700;
+}
+.af-flabel .req { color: var(--hot); font: 10px/1 var(--mono); }
+.af-flabel .spacer { flex: 1; }
+
+.af-src {
+  font: 9.5px/1 var(--mono);
+  padding: 3px 6px;
+  border-radius: 2px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--dim);
+  white-space: nowrap;
+}
+.af-src.known { color: var(--muted); }
+.af-src.blank { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); }
+
+.af-input,
+.af-area {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  outline: none;
+  font-size: 13px;
+  line-height: 1.55;
+}
+.af-input:focus, .af-area:focus { border-color: var(--hot); background: #fff; }
+.af-area { resize: vertical; min-height: 58px; }
+.af-input.edited, .af-area.edited { border-color: color-mix(in srgb, var(--hot) 45%, var(--line)); }
+
+.af-hint { font-size: 11px; color: var(--dim); margin-top: 5px; line-height: 1.5; }
+.af-null {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin-top: 5px;
+  padding: 7px 9px;
+  border: 1px dashed var(--line);
+  border-radius: 2px;
+  background: var(--bg);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.af-null .mk { flex: 0 0 auto; color: var(--warn); font: 700 10px/1.4 var(--mono); }
+
+/* ── list-shaped proposals: competitors + keyword seeds ── */
+
+.af-list { display: flex; flex-direction: column; gap: 7px; margin-top: 6px; }
+.af-item {
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: var(--bg);
+  padding: 8px 9px;
+}
+.af-item .top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.af-item .nm { font-size: 13px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.af-item .u {
+  font: 10.5px/1.3 var(--mono);
+  color: var(--muted);
+  word-break: break-all;
+  margin-top: 3px;
+}
+.af-compname {
+  flex: 1 1 140px;
+  padding: 5px 8px;
+  font-size: 13px;
+  font-weight: 600;
+  background: var(--paper);
+}
+/* Full row width + mono: this is the crawled address, and a truncated
+   rival URL cannot be inspected or corrected in place. */
+.af-compurl {
+  margin-top: 6px;
+  padding: 6px 8px;
+  font: 11.5px/1.4 var(--mono);
+  background: var(--paper);
+}
+.af-item .why, .af-item .af-why { font-size: 11.5px; line-height: 1.5; color: var(--muted); margin-top: 5px; }
+.af-item .acts { margin-left: auto; display: flex; gap: 5px; }
+.af-item .top.seedsrc { margin-top: 5px; }
+
+.af-mini {
+  font: 9.5px/1 var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 4px 6px;
+  border-radius: 2px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.af-mini:hover { color: var(--ink); border-color: var(--ink); }
+.af-mini.drop { color: var(--hot); border-color: color-mix(in srgb, var(--hot) 40%, var(--line)); }
+.af-mini.add { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 38%, var(--line)); }
+
+.af-seed { display: grid; grid-template-columns: 1fr auto auto; gap: 7px; align-items: center; }
+.af-seed .af-input { padding: 6px 8px; font-size: 12.5px; }
+.af-intent {
+  font: 9.5px/1 var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 3px 6px;
+  border-radius: 2px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--muted);
+}
+.af-intent.informational { color: var(--muted); }
+.af-intent.commercial { color: var(--ink); border-color: var(--muted); }
+.af-intent.transactional { color: var(--hot); border-color: color-mix(in srgb, var(--hot) 40%, var(--line)); }
+.af-intent.navigational { color: var(--dim); }
+.af-intent.unknown { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); }
+
+.af-addrow { display: flex; gap: 7px; margin-top: 8px; }
+
+/* ── metrics: every figure carries the tool and its raw output ── */
+
+.af-metrics { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.af-metric {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 10px;
+  align-items: baseline;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  background: var(--bg);
+  padding: 7px 9px;
+}
+.af-metric .ml { font-size: 12.5px; font-weight: 600; }
+.af-metric .mv { font: 700 14px/1 var(--mono); letter-spacing: -0.02em; text-align: right; }
+.af-metric .mraw {
+  grid-column: 1 / -1;
+  font: 10px/1.4 var(--mono);
+  color: var(--dim);
+  word-break: break-word;
+  border-top: 1px dashed var(--line);
+  padding-top: 5px;
+  margin-top: 3px;
+}
+.af-metric .mraw b { color: var(--muted); font-weight: 700; }
+
+/* ── notes from the agent, shown as the agent's own words ── */
+
+.af-notes { margin: 0; padding-left: 17px; font-size: 12px; line-height: 1.65; color: var(--muted); }
+.af-notes li + li { margin-top: 3px; }
+
+/* ── the gate. Nothing reaches Jev without passing through here. ── */
+
+.af-foot {
+  border-top: 1px solid var(--line);
+  background: var(--bg);
+  padding: 11px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px 14px;
+  flex-wrap: wrap;
+}
+
+.af-count { font: 10.5px/1.5 var(--mono); color: var(--muted); min-width: 0; flex: 1 1 200px; }
+.af-count b { color: var(--ink); font-weight: 700; }
+.af-count .warn { color: var(--warn); }
+.af-count .edited { color: var(--hot); }
+
+.af-actions { display: flex; gap: 8px; margin-left: auto; }
+
+.af-btn {
+  font: 11px/1 var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  padding: 9px 13px;
+  border-radius: 2px;
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--paper);
+  white-space: nowrap;
+  font-weight: 700;
+  transition: opacity 0.15s ease;
+}
+.af-btn:hover { opacity: 0.85; }
+.af-btn.quiet { background: transparent; color: var(--muted); border-color: var(--line); font-weight: 400; }
+.af-btn.quiet:hover { color: var(--ink); border-color: var(--ink); opacity: 1; }
+.af-btn:disabled { background: var(--line); border-color: var(--line); color: var(--dim); cursor: not-allowed; font-weight: 400; }
+
+.af-guard {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 14px;
+  border-top: 1px solid var(--line);
+  font: 10.5px/1.55 var(--mono);
+  color: var(--dim);
+}
+.af-guard .mk { flex: 0 0 auto; color: var(--hot); }
+.af-guard b { color: var(--muted); }
+
+.af-empty {
+  padding: 30px 16px;
+  text-align: center;
+  color: var(--muted);
+}
+.af-empty .t { font: 700 13px/1.3 var(--mono); color: var(--ink); }
+.af-empty .d { font-size: 12.5px; line-height: 1.6; margin-top: 7px; }
+.af-empty .next { margin-top: 12px; }
+
+@media (max-width: 900px) {
+  .af-seed { grid-template-columns: 1fr; }
+  .af-intent { justify-self: start; }
+  .af-metric { grid-template-columns: 1fr; }
+  .af-metric .mv { text-align: left; }
+  .af-actions { margin-left: 0; width: 100%; }
+  .af-btn { flex: 1 1 auto; text-align: center; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cap.checking::before, .af-check .spin { animation: none; }
+  .cap-btn, .af-btn { transition: none; }
+}
