@@ -7,8 +7,10 @@ from `README.md` with relative paths (`./.assets/...`).
 | --- | --- | --- |
 | `banner.png` | 2400×800 README header | HTML/CSS → Playwright, 2× DPR, `pngquant`-compressed to 192 KB |
 | `banner-prompt.md` | the AI photo-banner prompt + composite recipe | written by hand |
-| `layers.html` | interactive four-layer diagram of `docs/LAYERS.md` | hand-authored, no dependencies |
-| `layers.png` | static frame of the diagram, default state (layer 1) | `layers.html` → Playwright 2× |
+| `layers.html` | **interactive** diagram — rotates on its own, click to hold | pure-CSS rotation + a small JS override |
+| `layers.gif` | 760×392, 20 frames, 6.3 s loop. What the README shows | re-shoot the 4 states, blend, quantise to 48 colours |
+| `layers.webp` | same animation, lossy WebP. Smaller than the GIF on the wire | same frames, `quality=82` |
+| `layers.png` | static frame, default state (layer 1) | `layers.html` → Playwright 2× |
 | `layers-jev.png` | static frame with layer 3 selected | `layers.html` → Playwright 2× |
 
 ## Why a dot-folder

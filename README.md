@@ -34,26 +34,37 @@ count. See [No search volume, honestly](#no-search-volume-honestly).
 
 ## The four layers
 
-Each layer promises the next something specific. Click a layer to see its invariants and the traps
-that cost time rather than code.
+Each layer promises the next something specific. It rotates on its own through all four; click one to
+hold it, or use the arrow keys.
 
-<a href=".assets/layers.html" target="_blank" rel="noopener">
-  <img src=".assets/layers.png" alt="The four layers: crawler, opencode session, Jev decision, dashboard UI — click to open the interactive version" width="100%">
-</a>
+![The four layers — crawler, opencode session, Jev decision, dashboard UI — rotating automatically](.assets/layers.gif)
 
 <p align="center">
   <sub>
-    Static frame above &middot;
-    <a href=".assets/layers.html" target="_blank" rel="noopener">open the interactive diagram &rarr;</a>
+    Rotates automatically &middot;
+    <a href=".assets/layers.png">static frame</a> &middot;
+    <a href=".assets/layers.webp">animated WebP (560 KB)</a>
   </sub>
 </p>
 
 <details>
-<summary><b>Embed it live in an <code>iframe</code></b> — <small>(GitHub strips iframes from READMEs; this works on self-hosted mirrors and docs sites)</small></summary>
+<summary><b>Interactive version</b> — <small>(click a layer, or use &larr; &rarr;; also pauses on demand)</small></summary>
 
-```html
-<iframe src=".assets/layers.html" width="100%" height="720" style="border:1px solid #d8d5cf;border-radius:12px" loading="lazy" title="jev-seo — the four layers"></iframe>
+The GIF above is a recording, because GitHub serves this repository's HTML inside a **sandboxed
+frame** with scripting disabled, and a private repository's raw URLs need authentication. So the
+clickable original needs to be served over HTTP as a real page:
+
+```bash
+# from a checkout — no build, no dependencies
+python3 -m http.server 8899 --directory .assets
+# then open http://localhost:8899/layers.html
 ```
+
+It will also be live at the GitHub Pages URL once Pages is enabled for this repository
+(see the plan constraint in [`AGENTS.md`](AGENTS.md)).
+
+The rotation is **pure CSS**, so it survives having scripts blocked entirely; the JavaScript only adds
+the click-to-hold override. It also stops itself under `prefers-reduced-motion`.
 
 </details>
 

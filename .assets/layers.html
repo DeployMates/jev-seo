@@ -14,6 +14,8 @@
     --line: rgba(11, 11, 10, .12);
     --muted: rgba(11, 11, 10, .55);
     --faint: rgba(11, 11, 10, .38);
+    --cycle: 18s;   /* full rotation */
+    --slot: 4.5s;   /* one layer's turn */
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -35,11 +37,28 @@
     border-bottom: 1px solid var(--line);
   }
   .rule b { font-size: 16px; font-weight: 650; letter-spacing: -.01em; }
-  .rule span { font-size: 13.5px; color: var(--muted); }
+  .rule span.r { font-size: 13.5px; color: var(--muted); }
+
+  /* Auto/manual control. In the markup on purpose: it exists with no script.
+     JS only wires behaviour. */
+  .mode {
+    margin-left: auto; flex: none; display: inline-flex; align-items: center; gap: 7px;
+    font: 11px/1 var(--sans); font-weight: 650; letter-spacing: .09em; text-transform: uppercase;
+    color: var(--muted); background: var(--paper); border: 1px solid var(--line);
+    border-radius: 100px; padding: 6px 11px 6px 9px; cursor: pointer;
+  }
+  .mode:hover { border-color: var(--hot); color: var(--ink); }
+  .mode .led { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); flex: none; }
+  :root.manual .mode .led { background: var(--faint); }
+  :root.manual .mode .txt::after { content: "paused"; }
+  :root:not(.manual) .mode .led { background: var(--hot); box-shadow: 0 0 0 3px rgba(255, 90, 31, .18); }
+  :root:not(.manual) .mode .txt::after { content: "playing"; }
+  .mode .vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 
   /* ── pipeline ────────────────────────────────────── */
   .pipe { display: flex; align-items: stretch; margin-bottom: 22px; }
   .node {
+    --i: 0;
     flex: 1; min-width: 0; cursor: pointer;
     background: var(--paper);
     border: 1px solid var(--line);
@@ -47,12 +66,29 @@
     padding: 13px 14px 12px;
     transition: border-color .15s, box-shadow .15s, transform .15s;
   }
-  .node:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(11,11,10,.07); }
-  .node[aria-selected="true"] {
-    border-color: var(--hot);
-    box-shadow: 0 0 0 1px var(--hot), 0 4px 16px rgba(255,90,31,.13);
-  }
+  .node:hover { transform: translateY(-1px); }
   .node:focus-visible { outline: 2px solid var(--hot); outline-offset: 2px; }
+
+  /* Each node lights for its own slot, staggered by a negative delay.
+     This is the DEFAULT state and is pure CSS on purpose: the rotation must
+     survive a script sandbox (GitHub's blob view blocks scripts entirely). */
+  .node {
+    animation: nodeOn var(--cycle) linear infinite;
+    animation-delay: calc(var(--i) * var(--slot));
+  }
+  @keyframes nodeOn {
+    0%, 24.99% { border-color: var(--hot); box-shadow: 0 0 0 1px var(--hot), 0 4px 16px rgba(255,90,31,.13); }
+    25%, 100%  { border-color: var(--line); box-shadow: none; }
+  }
+  /* the numbered dot warms to the accent while its layer is up */
+  @keyframes dotOn {
+    0%, 24.99% { background: var(--hot); }
+    25%, 100%  { background: var(--ink); }
+  }
+  .n-num {
+    animation: dotOn var(--cycle) linear infinite;
+    animation-delay: calc(var(--i) * var(--slot));
+  }
 
   .n-top { display: flex; align-items: center; gap: 7px; margin-bottom: 7px; }
   .n-num {
@@ -60,7 +96,6 @@
     background: var(--ink); color: var(--paper);
     font-size: 10.5px; font-weight: 700; line-height: 17px; text-align: center;
   }
-  .node[aria-selected="true"] .n-num { background: var(--hot); }
   .n-name { font-size: 13.5px; font-weight: 650; letter-spacing: -.005em; white-space: nowrap; }
   .n-file { font-size: 10.5px; color: var(--faint); margin-bottom: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .n-gives { font-size: 12px; color: var(--muted); line-height: 1.4; }
@@ -71,71 +106,107 @@
 
   .arrow { flex: none; width: 26px; display: flex; align-items: center; justify-content: center; color: var(--faint); }
 
-  /* ── detail panel ────────────────────────────────── */
-  .detail {
+  /* ── detail panels ───────────────────────────────── */
+  .panels { display: grid; }              /* all four share one grid cell */
+  .panel {
+    --i: 0;
+    grid-area: 1 / 1;
     background: var(--paper); border: 1px solid var(--line); border-radius: 10px;
-    padding: 15px 17px 16px; min-height: 168px;
+    padding: 15px 17px 16px;
   }
-  .d-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 3px; }
-  .d-title { font-size: 14px; font-weight: 650; }
+
+  .panel {
+    opacity: 0;
+    animation: cyc var(--cycle) linear infinite;
+    animation-delay: calc(var(--i) * var(--slot));
+  }
+  /* visible only inside this panel's own slot: fade in, hold, fade out by 25% */
+  @keyframes cyc {
+    0%        { opacity: 0; transform: translateY(6px); }
+    3%, 22%   { opacity: 1; transform: none; }
+    25%, 100% { opacity: 0; transform: translateY(-6px); }
+  }
+
+  /* MANUAL — a click took over; freeze the rotation, show only .is-on */
+  :root.manual .node, :root.manual .n-num { animation: none; }
+  :root.manual .node[aria-selected="true"] {
+    border-color: var(--hot); box-shadow: 0 0 0 1px var(--hot), 0 4px 16px rgba(255,90,31,.13);
+  }
+  :root.manual .n-num[aria-selected="true"] { background: var(--hot); }
+  :root.manual .panel { opacity: 0; animation: none; transform: none; }
+  :root.manual .panel.is-on { opacity: 1; }
+
+  .d-title { font-size: 14px; font-weight: 650; margin-bottom: 3px; }
   .d-promise { font-size: 12.5px; color: var(--muted); margin-bottom: 13px; }
   .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
-  .lbl {
-    font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
-    color: var(--faint); font-weight: 650; margin-bottom: 7px;
-  }
+  .lbl { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--faint); font-weight: 650; margin-bottom: 7px; }
   ul { list-style: none; }
-  li { position: relative; padding-left: 14px; margin-bottom: 5px; font-size: 12.5px; line-height: 1.45; color: var(--ink); }
+  li { position: relative; padding-left: 14px; margin-bottom: 5px; font-size: 12.5px; line-height: 1.45; }
   li::before { content: ""; position: absolute; left: 0; top: 7px; width: 5px; height: 1.5px; background: var(--ink); opacity: .45; }
   li.trap::before { width: 5px; height: 5px; border-radius: 50%; top: 6px; background: var(--hot); opacity: 1; }
   li b { font-weight: 650; }
-  li em { font-style: normal; color: var(--muted); }
+  code { font-family: var(--mono); font-size: .92em; }
 
   /* ── footer strips ──────────────────────────────── */
   .strips { display: flex; gap: 10px; margin-top: 12px; }
-  .strip {
-    flex: 1; background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
-  }
+  .strip { flex: 1; background: var(--paper); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
   .chips { display: flex; gap: 5px; flex-wrap: wrap; }
-  .chip {
-    font-size: 11px; padding: 2.5px 7px; border-radius: 5px;
-    background: var(--ink); color: var(--paper); font-weight: 600;
-  }
+  .chip { font-size: 11px; padding: 2.5px 7px; border-radius: 5px; background: var(--ink); color: var(--paper); font-weight: 600; }
   .chip.g { background: rgba(11,11,10,.13); color: var(--ink); font-weight: 500; }
   .chip.hot { background: var(--hot); }
   .strip-note { font-size: 10.5px; color: var(--faint); margin-top: 6px; }
+
+  @media (max-width: 720px) {
+    .cols { grid-template-columns: 1fr; gap: 14px; }
+    .strips { flex-direction: column; }
+    body { padding: 20px 18px; }
+  }
+
+  /* OS reduced-motion: no rotation, no movement, first layer shown. */
+  @media (prefers-reduced-motion: reduce) {
+    .node, .n-num, .panel { animation: none !important; }
+    .panel { opacity: 0; }
+    .panel:first-of-type { opacity: 1; }
+    .node:first-of-type { border-color: var(--hot); }
+    .n-num:first-of-type { background: var(--hot); }
+    .node { transition: none; }
+  }
 </style>
 </head>
 <body>
 
   <div class="rule">
     <b>The rule every layer upholds</b>
-    <span>code finds, Jev judges, the dashboard shows the probabilities.</span>
+    <span class="r">code finds, Jev judges, the dashboard shows the probabilities.</span>
+    <button class="mode" id="mode" type="button">
+      <span class="led" aria-hidden="true"></span><span class="txt" aria-hidden="true"></span>
+      <span class="vh">Toggle automatic rotation</span>
+    </button>
   </div>
 
   <div class="pipe" role="tablist" aria-label="The four layers">
-    <div class="node" role="tab" tabindex="0" aria-selected="true" data-i="0">
+    <div class="node" role="tab" tabindex="0" aria-selected="false" data-i="0" style="--i:0">
       <div class="n-top"><span class="n-num">1</span><span class="n-name">Crawler</span></div>
       <div class="n-file mono">crawl.ts</div>
       <div class="n-gives">PageEvidence, LinkGraph, RobotsInfo, SitemapUrls</div>
       <div class="n-promise">measured</div>
     </div>
-    <div class="arrow">&rarr;</div>
-    <div class="node" role="tab" tabindex="-1" aria-selected="false" data-i="1">
+    <div class="arrow" aria-hidden="true">&rarr;</div>
+    <div class="node" role="tab" tabindex="-1" aria-selected="false" data-i="1" style="--i:1">
       <div class="n-top"><span class="n-num">2</span><span class="n-name">opencode session</span></div>
       <div class="n-file mono">agent.ts</div>
       <div class="n-gives">competitors + keyword seeds, each with an evidence_tool</div>
       <div class="n-promise">sourced</div>
     </div>
-    <div class="arrow">&rarr;</div>
-    <div class="node" role="tab" tabindex="-1" aria-selected="false" data-i="2">
+    <div class="arrow" aria-hidden="true">&rarr;</div>
+    <div class="node" role="tab" tabindex="-1" aria-selected="false" data-i="2" style="--i:2">
       <div class="n-top"><span class="n-num">3</span><span class="n-name">Jev decision</span></div>
       <div class="n-file mono">questions.ts &middot; state.ts</div>
       <div class="n-gives">probabilities, with the question id attached</div>
       <div class="n-promise">calibrated, in code</div>
     </div>
-    <div class="arrow">&rarr;</div>
-    <div class="node" role="tab" tabindex="-1" aria-selected="false" data-i="3">
+    <div class="arrow" aria-hidden="true">&rarr;</div>
+    <div class="node" role="tab" tabindex="-1" aria-selected="false" data-i="3" style="--i:3">
       <div class="n-top"><span class="n-num">4</span><span class="n-name">Dashboard UI</span></div>
       <div class="n-file mono">web/src/</div>
       <div class="n-gives">the three views</div>
@@ -143,19 +214,102 @@
     </div>
   </div>
 
-  <div class="detail">
-    <div class="d-head"><span class="d-title" id="dTitle"></span></div>
-    <div class="d-promise" id="dPromise"></div>
-    <div class="cols">
-      <div>
-        <div class="lbl">Invariants</div>
-        <ul id="dInv"></ul>
+  <div class="panels">
+
+    <article class="panel" data-i="0" style="--i:0" aria-label="Layer 1: Crawler">
+      <div class="d-title">Crawler</div>
+      <div class="d-promise">Promises: every number here is a count. Nothing in this file asks a question.</div>
+      <div class="cols">
+        <div>
+          <div class="lbl">Invariants</div>
+          <ul>
+            <li>Bounded <b>three ways at once</b> — page count, depth, and a wall-clock budget</li>
+            <li>Sitemap URLs seed the queue when one exists, else the homepage&rsquo;s internal links</li>
+            <li>A <b>second pass</b> stamps inbound degree, because a page cannot know it mid-fetch</li>
+            <li><b>Jitter is not decoration</b> — eight workers backing off identically retry in lockstep</li>
+          </ul>
+        </div>
+        <div>
+          <div class="lbl">Traps</div>
+          <ul>
+            <li class="trap"><b>SSRF.</b> <code>assertPublicUrl</code> rejects loopback, private and link-local hosts, so a pasted URL cannot reach an internal service. No DNS step — which is also why it is easy to test.</li>
+            <li class="trap"><b><code>ruleFindings</code> cannot stream.</b> The rule pass is site-wide and needs the finished link graph, so a per-page count at fetch time would be a lie.</li>
+            <li class="trap"><b>Non-HTML is skipped silently.</b> Not an error, and it does not count toward maxPages.</li>
+          </ul>
+        </div>
       </div>
-      <div>
-        <div class="lbl">Traps</div>
-        <ul id="dTrap"></ul>
+    </article>
+
+    <article class="panel" data-i="1" style="--i:1" aria-label="Layer 2: opencode session">
+      <div class="d-title">opencode session</div>
+      <div class="d-promise">Promises: every figure it reports came from a tool it actually called.</div>
+      <div class="cols">
+        <div>
+          <div class="lbl">Invariants</div>
+          <ul>
+            <li>The allowlist is built <b>per run</b> from the onboarding gate — no verified GSC, no <code>gsc</code> tool at all</li>
+            <li><b>Three gates</b>, each fatal: <code>schema-invalid</code>, <code>ungranted-tool</code>, <code>unsourced-number</code></li>
+            <li>Citations naming an uncalled tool are <b>flagged, not fatal</b> — a mislabelled name is smaller than a fabricated metric</li>
+          </ul>
+        </div>
+        <div>
+          <div class="lbl">Traps</div>
+          <ul>
+            <li class="trap"><b>A granted tool must be a real MCP server.</b> <code>TOOL_IDS</code>, the allowlist, the name pattern, the description and <code>.mcp.json</code> are one fact in five places. A granted tool with no server is <b>worse</b> than a missing one.</li>
+            <li class="trap"><b><code>google-trends</code> was removed, not registered.</b> No official API, and its &ldquo;relative interest&rdquo; index is the pseudo-volume this project refuses to show a paying customer.</li>
+            <li class="trap"><b>Crawled page text is untrusted.</b> A blanket write grant would let page-prompted HTML drop a file anywhere on disk. This is the entire prompt-injection surface.</li>
+          </ul>
+        </div>
       </div>
-    </div>
+    </article>
+
+    <article class="panel" data-i="2" style="--i:2" aria-label="Layer 3: Jev decision">
+      <div class="d-title">Jev decision</div>
+      <div class="d-promise">Promises: every question was asked, and the state it saw is recorded.</div>
+      <div class="cols">
+        <div>
+          <div class="lbl">Invariants</div>
+          <ul>
+            <li><b>One request per item, always.</b> A page is one item, a site is one item, a keyword is one item</li>
+            <li>The state is <b>derived from the question set</b>, never the reverse — irrelevant context measurably lowers accuracy</li>
+            <li>Each state carries a <code>state_meta</code> block saying what was trimmed; a judgement over half a page must be able to see that</li>
+            <li>Gap buckets are a <b>pure function of five booleans</b> — composed, so they can be checked and re-derived when a threshold moves</li>
+          </ul>
+        </div>
+        <div>
+          <div class="lbl">Traps</div>
+          <ul>
+            <li class="trap"><b>Jev has no search volume, no index, no backlink graph.</b> There is no way to produce a monthly search count from this state. Opportunity is computed in code (<code>opportunityOf</code>); change coefficients there, never in a prompt.</li>
+            <li class="trap"><b>Widening <code>act</code> is the easiest way to make this product wrong.</b> It raises apparent coverage at the cost of every false positive on the page.</li>
+            <li class="trap"><b>Undecided resolves toward the actionable side.</b> A term we are unsure we cover is treated as not covered — writing a page wrongly costs an afternoon, assuming coverage means it never gets written.</li>
+          </ul>
+        </div>
+      </div>
+    </article>
+
+    <article class="panel" data-i="3" style="--i:3" aria-label="Layer 4: Dashboard UI">
+      <div class="d-title">Dashboard UI</div>
+      <div class="d-promise">Promises: renders before the run ends.</div>
+      <div class="cols">
+        <div>
+          <div class="lbl">Invariants</div>
+          <ul>
+            <li>The audit is a <b>stream, not a request/response</b> — one NDJSON event per line as it happens</li>
+            <li>Read with <code>fetch</code> + <code>response.body.getReader()</code>, because <code>EventSource</code> cannot POST</li>
+            <li>The three views — <b>pages, keywords, competitors</b> — are three lenses on the same stream</li>
+          </ul>
+        </div>
+        <div>
+          <div class="lbl">Traps</div>
+          <ul>
+            <li class="trap"><b><code>res.on(&ldquo;close&rdquo;)</code>, never <code>req</code>.</b> A POST request's <code>req</code> emits close the instant its body is read, which is immediately — listening there tears the stream down after the first event.</li>
+            <li class="trap"><b>Buffer-busting headers are load-bearing.</b> <code>Cache-Control: no-store</code>, <code>X-Accel-Buffering: no</code>, <code>flushHeaders()</code>. Without them a proxy holds the whole stream and the UI looks broken while the server works fine.</li>
+            <li class="trap"><b>A field can be absent from the stream and present in the report.</b> Per-page ruleFindings is the current example. Render streamed fields as optional and reconcile from <code>done</code>.</li>
+          </ul>
+        </div>
+      </div>
+    </article>
+
   </div>
 
   <div class="strips">
@@ -181,97 +335,58 @@
   </div>
 
 <script>
-const L = [
-  {
-    t: "Crawler",
-    p: "Promises: every number here is a count. Nothing in this file asks a question.",
-    inv: [
-      "Bounded <b>three ways at once</b> — page count, depth, and a wall-clock budget",
-      "Sitemap URLs seed the queue when one exists, else the homepage&rsquo;s internal links",
-      "A <b>second pass</b> stamps inbound degree, because a page cannot know it mid-fetch",
-      "<b>Jitter is not decoration</b> — eight workers backing off identically retry in lockstep"
-    ],
-    tr: [
-      { h: "SSRF.", t: " <code>assertPublicUrl</code> rejects loopback, private and link-local hosts, so a pasted URL cannot reach an internal service. No DNS step — which is also why it is easy to test." },
-      { h: "<code>ruleFindings</code> cannot stream.", t: " The rule pass is site-wide and needs the finished link graph, so a per-page count at fetch time would be a lie." },
-      { h: "Non-HTML is skipped silently.", t: " Not an error, and it does not count toward maxPages." }
-    ]
-  },
-  {
-    t: "opencode session",
-    p: "Promises: every figure it reports came from a tool it actually called.",
-    inv: [
-      "The allowlist is built <b>per run</b> from the onboarding gate — no verified GSC, no <code>gsc</code> tool at all",
-      "<b>Three gates</b>, each fatal: <code>schema-invalid</code>, <code>ungranted-tool</code>, <code>unsourced-number</code>",
-      "Competitor and keyword citations naming an uncalled tool are <b>flagged, not fatal</b> — a mislabelled name is smaller than a fabricated metric"
-    ],
-    tr: [
-      { h: "A granted tool must be a real MCP server.", t: " <code>TOOL_IDS</code>, the allowlist, the name pattern, the description and <code>.mcp.json</code> are one fact in five places. A granted tool with no server is <b>worse</b> than a missing one." },
-      { h: "<code>google-trends</code> was removed, not registered.", t: " No official API, and its &ldquo;relative interest&rdquo; index is the pseudo-volume this project refuses to show a paying customer." },
-      { h: "Crawled page text is untrusted.", t: " A blanket write grant would let page-prompted HTML drop a file anywhere on disk. This is the entire prompt-injection surface." }
-    ]
-  },
-  {
-    t: "Jev decision",
-    p: "Promises: every question was asked, and the state it saw is recorded.",
-    inv: [
-      "<b>One request per item, always.</b> A page is one item, a site is one item, a keyword is one item",
-      "The state is <b>derived from the question set</b>, never the reverse — irrelevant context measurably lowers accuracy",
-      "Each state carries a <code>state_meta</code> block saying what was trimmed; a judgement over half a page must be able to see that",
-      "Gap buckets are a <b>pure function of five booleans</b> — composed, so they can be checked and re-derived when a threshold moves"
-    ],
-    tr: [
-      { h: "Jev has no search volume, no index, no backlink graph.", t: " There is no way to produce a monthly search count from this state. Opportunity is computed in code (<code>opportunityOf</code>); change coefficients there, never in a prompt." },
-      { h: "Widening <code>act</code> is the easiest way to make this product wrong.", t: " It raises apparent coverage at the cost of every false positive on the page." },
-      { h: "Undecided resolves toward the actionable side.", t: " A term we are unsure we cover is treated as not covered — writing a page wrongly costs an afternoon, assuming coverage means it never gets written." }
-    ]
-  },
-  {
-    t: "Dashboard UI",
-    p: "Promises: renders before the run ends.",
-    inv: [
-      "The audit is a <b>stream, not a request/response</b> — one NDJSON event per line as it happens",
-      "Read with <code>fetch</code> + <code>response.body.getReader()</code>, because <code>EventSource</code> cannot POST",
-      "The three views — <b>pages, keywords, competitors</b> — are three lenses on the same stream"
-    ],
-    tr: [
-      { h: "<code>res.on(&ldquo;close&rdquo;)</code>, never <code>req</code>.", t: " A POST request's <code>req</code> emits close the instant its body is read, which is immediately — listening there tears the stream down after the first event." },
-      { h: "Buffer-busting headers are load-bearing.", t: " <code>Cache-Control: no-store</code>, <code>X-Accel-Buffering: no</code>, <code>flushHeaders()</code>. Without them a proxy holds the whole stream and the UI looks broken while the server works fine." },
-      { h: "A field can be absent from the stream and present in the report.", t: " Per-page ruleFindings is the current example. Render streamed fields as optional and reconcile from <code>done</code>." }
-    ]
+/* Everything above already works with this script blocked — the rotation is
+   pure CSS. This block only adds a manual override. */
+(function () {
+  var root = document.documentElement;
+  var nodes = [].slice.call(document.querySelectorAll(".node"));
+  var panels = [].slice.call(document.querySelectorAll(".panel"));
+  var reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var manual = -1;
+
+  root.classList.add("js");
+
+  function show(i) {
+    manual = i;
+    root.classList.add("manual");
+    panels.forEach(function (p, k) { p.classList.toggle("is-on", k === i); });
+    nodes.forEach(function (n, k) {
+      n.setAttribute("aria-selected", String(k === i));
+      n.tabIndex = k === i ? 0 : -1;
+    });
   }
-];
 
-const nodes = [...document.querySelectorAll(".node")];
-const inv = document.getElementById("dInv");
-const trp = document.getElementById("dTrap");
+  function play() {
+    manual = -1;
+    root.classList.remove("manual");
+    nodes.forEach(function (n) { n.setAttribute("aria-selected", "false"); });
+  }
 
-function select(i) {
-  const d = L[i];
-  document.getElementById("dTitle").textContent = d.t;
-  document.getElementById("dPromise").textContent = d.p;
-  inv.innerHTML = d.inv.map(x => "<li>" + x + "</li>").join("");
-  trp.innerHTML = d.tr.map(x => '<li class="trap"><b>' + x.h + "</b>" + x.t + "</li>").join("");
-  nodes.forEach((n, k) => {
-    n.setAttribute("aria-selected", String(k === i));
-    n.tabIndex = k === i ? 0 : -1;
-  });
-}
+  root.classList.remove("manual");   // rotate by default, exactly as the CSS does
 
-nodes.forEach(n => {
-  const i = Number(n.dataset.i);
-  n.addEventListener("click", () => select(i));
-  n.addEventListener("keydown", e => {
-    if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+  nodes.forEach(function (n, i) {
+    n.addEventListener("click", function () { show(i); });
+    n.addEventListener("keydown", function (e) {
+      var k = null;
+      if (e.key === "ArrowRight") k = (i + 1) % nodes.length;
+      else if (e.key === "ArrowLeft") k = (i - 1 + nodes.length) % nodes.length;
+      else if (e.key === " " || e.key === "Enter") k = i;
+      if (k === null) return;
       e.preventDefault();
-      const k = e.key === "ArrowRight" ? (i + 1) % 4 : (i + 3) % 4;
-      select(k);
+      show(k);
       nodes[k].focus();
-    }
+    });
   });
-});
 
-select(0);
+  var btn = document.getElementById("mode");
+  if (btn) btn.addEventListener("click", function () {
+    if (manual >= 0) play(); else show(0);
+  });
+
+  /* deterministic hooks for the screenshot harness */
+  window.__layer = show;
+  window.__play = play;
+})();
 </script>
 </body>
 </html>
