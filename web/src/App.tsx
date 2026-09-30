@@ -871,12 +871,10 @@ export default function App() {
           Take the tour
         </button>
         {config && (
-          <span className={`pill ${config.jevConfigured ? "live" : "off"}`}>
-            {config.jevConfigured
-              ? config.jevCalibrated === false
-                ? `local judge · ${config.jevModel} · probabilities uncalibrated`
-                : `jev live · ${config.jevModel}`
-              : "jev not configured · partial audit"}
+          <span className={`pill ${config.jevBackend === "zen" ? "live" : "off"}`}>
+            {config.jevBackend === "zen"
+              ? `jev live · ${config.jevModel}`
+              : `local judge, not Jev · ${config.jevModel} unreachable`}
           </span>
         )}
       </div>

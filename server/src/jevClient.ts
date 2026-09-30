@@ -20,6 +20,12 @@ import {
   zenHeaders,
   zenKey,
 } from "./config.js"
+import {
+  currentUpstream,
+  dispatcherFor,
+  rotateAfterQuota,
+} from "./zenProxy.js"
+import type { Dispatcher } from "undici"
 import type { Questions } from "./questions.js"
 
 export interface ChoiceAnswer {
@@ -158,6 +164,7 @@ export async function systemOne(
   const started = Date.now()
 
   let lastError: unknown
+  let upstream = currentUpstream()
   for (let attempt = 1; attempt <= JEV_MAX_RETRIES; attempt += 1) {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), JEV_TIMEOUT_MS)
@@ -170,13 +177,25 @@ export async function systemOne(
         headers: zenHeaders(key),
         body: JSON.stringify({ state, model, questions }),
         signal: controller.signal,
-      })
+        dispatcher: dispatcherFor(upstream),
+      } as RequestInit & { dispatcher?: Dispatcher })
 
       if (!response.ok) {
         const body = await response.text().catch(() => "")
         // 401/403 mean a credential problem: abort the run rather than retry.
         if (response.status === 401 || response.status === 403) {
           throw new JevAuthError()
+        }
+        const isQuota =
+          response.status === 429 || /FreeUsageLimitError|rate limit exceeded/i.test(body)
+        if (isQuota) {
+          const next = rotateAfterQuota(upstream)
+          if (next) {
+            upstream = next
+            lastError = undefined
+            attempt -= 1
+            continue
+          }
         }
         const retryAfterHeader = response.headers.get("retry-after")
         const retryAfterMs = retryAfterHeader

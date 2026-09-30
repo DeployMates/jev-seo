@@ -13,6 +13,7 @@ export interface ServerConfig {
   jevModel: string
   jevBackend?: "zen" | "local"
   jevCalibrated?: boolean
+  judgeRunning?: string
   agentConfigured: boolean
   agentModel: string
   gscConfigured: boolean

@@ -24,6 +24,7 @@ import {
   judgeModel,
   JevAuthError,
 } from "./judge.js"
+import { activeModel } from "./jevClient.js"
 import {
   connectServiceAccount,
   isConfigured as gscConfigured,
@@ -46,9 +47,10 @@ app.use(express.json({ limit: "1mb" }))
 function capacity() {
   return {
     jevConfigured: isConfigured(),
-    jevModel: judgeModel(),
+    jevModel: activeModel(),
     jevBackend: judgeBackend(),
     jevCalibrated: isCalibrated(),
+    judgeRunning: judgeModel(),
     agentConfigured: isAgentAvailable(),
     agentModel: activeAgentModel(),
     gscConfigured: gscConfigured(),

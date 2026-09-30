@@ -161,7 +161,9 @@ export const WITNESS: Record<string, (page: PageEvidence) => string | null> = {
     const sentences = page.opening.match(/[^.!?]+[.!?]*/g) ?? []
     const firstTwo = sentences.slice(0, 2).join(" ").trim()
     const words = firstTwo.length === 0 ? 0 : firstTwo.split(/\s+/).filter(Boolean).length
-    if (words === 0) return "The page has no opening text at all"
+    if (words === 0) {
+      return `No text sits between the H1 and the next heading — the extractor read ${page.words} words on this page, so this is where the answer should be stated`
+    }
     return `The first two sentences run ${words} word${words === 1 ? "" : "s"}; the opening as a whole runs ${page.opening.split(/\s+/).filter(Boolean).length}`
   },
   add_self_contained_facts: (page) =>
@@ -309,9 +311,29 @@ const LAST_RESORT_QUESTION = "page_type"
  * the question registry. The caller pushes a reason for each; the grey zone is
  * published, not hidden and not widened.
  */
+/**
+ * A second, relative route to `act`, because "decisive" is a statement about the
+ * shape of the distribution and not only about its height.
+ *
+ * `highest_impact_change` returns one option at a time out of ten, so its
+ * absolute confidence stays low even when the winner is not remotely in doubt —
+ * a page measured at 0.68 with the runner-up on 0.18 is a four-to-one answer and
+ * is actionable. Requiring that one to clear the 0.88 absolute bar emptied the
+ * DO THIS NOW queue on a site where the model had in fact picked a winner on
+ * every page.
+ *
+ * Lowering the absolute bar instead would be the easy fix and the wrong one: it
+ * would also admit flat distributions like 0.37 / 0.30 / 0.17, where the model has
+ * genuinely not decided. The margin keeps those out, so the grey zone still means
+ * what it says.
+ *
+ * Both coefficients are exported because they are arguments, not magic.
+ */
+export const DECISIVE_MARGIN = 0.2
+export const DECISIVE_FLOOR = 0.5
+
 export function topChangeFor(input: TopChangeInput): TopChange | null {
   const { key, probabilities, band, page, options } = input
-  if (band !== "act") return null
   if (key === NO_CHANGE) return null
 
   const copy = copyFor(key, options)
@@ -320,12 +342,18 @@ export function topChangeFor(input: TopChangeInput): TopChange | null {
   const p = probabilities[key]
   if (typeof p !== "number" || !Number.isFinite(p)) return null
 
+  const runnerUp = runnerUpFor(probabilities, key)
+  const decisiveByMargin =
+    runnerUp !== null && p - runnerUp.p >= DECISIVE_MARGIN && p >= DECISIVE_FLOOR
+
+  if (band !== "act" && !decisiveByMargin) return null
+
   return {
     key,
     instruction: copy.what,
     example: copy.examples,
     p: Number(p.toFixed(3)),
-    runnerUp: runnerUpFor(probabilities, key),
+    runnerUp,
     band,
     witness: witnessFor(key, page),
     falsifier: falsifierFor(key, input.askedIds),
