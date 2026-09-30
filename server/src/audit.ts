@@ -61,7 +61,14 @@ import {
   type TopChange,
 } from "./decisions.js"
 import { buildSubjects, seedSet, type SubjectRow } from "./subjects.js"
-import { diffRuns, loadHistory, recordRun, type HistoryRun, type RunDelta } from "./history.js"
+import {
+  diffRuns,
+  loadHistory,
+  recordRun,
+  type HistoryRun,
+  type PageBandWord,
+  type RunDelta,
+} from "./history.js"
 import { HIGHEST_IMPACT_CHANGES } from "./questions.js"
 
 /** Rivals past this cap are reported as uncrawled rather than silently dropped. */
@@ -1640,16 +1647,28 @@ export async function runAudit(request: AuditRequest, emit: (event: AuditEvent) 
       return {
         path: page.path,
         url: page.url,
-        open: decision != null || actFinding,
+        // Reachability is crawled AND judged. `decisions` is deliberately not
+        // part of it: a page can be reachable and raise nothing, and that is
+        // recorded in `notDecided`. Treating an absent decision as "never
+        // looked at" is the one inference this snapshot must not make.
+        reachable: judged != null,
+        // A decision can only exist for a judged page, so `raised` implies
+        // `reachable`. Stated rather than assumed: a snapshot that recorded
+        // work on a page we never judged would report it as a new finding, and
+        // the delta has no way to tell that apart from a real one.
+        raised: judged != null && (decision != null || actFinding),
+        topChangeKey: decision?.topChange.key ?? null,
         topChange: decision?.topChange.instruction ?? null,
-        band: decision?.topChange.band ?? judged?.band ?? null,
+        band: bandWordFor(decision?.topChange.band ?? judged?.band ?? null, judged?.needsHuman === true),
         findings: judged?.findings.length ?? 0,
         ruleFindings: ruleFindings.filter((f) => f.pages.includes(page.path)).length,
         words: page.words,
       }
     }),
   }
-  snapshot.openPages = snapshot.pages.filter((page) => page.open).length
+  // Field name kept as `openPages`: picasso and setbon's copy both already read
+  // it. The semantics are now "raised" — see `HistoryPage.raised`.
+  snapshot.openPages = snapshot.pages.filter((page) => page.raised).length
 
   // Read the previous run BEFORE recording this one, or every run is its own
   // baseline and the delta is always empty.
@@ -1734,6 +1753,25 @@ export async function runAudit(request: AuditRequest, emit: (event: AuditEvent) 
   })
   emit({ type: "done", report })
   return report
+}
+
+/**
+ * Internal band to panel word.
+ *
+ * `act` / `review` / `escalate` are threshold vocabulary and never reach a
+ * customer. The ordering is the point: `needs a human` is strictly worse than
+ * `to verify`, which is strictly worse than `decisive`, because `diffRuns` reads
+ * a rise in that order as a regression.
+ *
+ * `needsHuman` outranks the band. A page whose answer was spread thin enough to
+ * send it to the human pile is in that pile whatever its band says, and a
+ * snapshot that reported it as `decisive` would show a decision getting sharper
+ * at the exact moment the system stopped trusting itself.
+ */
+function bandWordFor(band: Band | null, needsHuman: boolean): PageBandWord | null {
+  if (band === null) return null
+  if (band === "escalate" || needsHuman) return "needs a human"
+  return band === "act" ? "decisive" : "to verify"
 }
 
 function ruleOnlyScore(

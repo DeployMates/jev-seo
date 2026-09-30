@@ -2,15 +2,27 @@ import type { PageDelta, RunDelta } from "./types"
 import "./decisions.css"
 
 const COLUMN_WORD: Record<string, string> = {
-  fixed: "fixed",
+  fixed: "no longer raised",
   still_open: "still open",
-  new: "new",
+  new: "newly raised",
   regressed: "regressed",
 }
 
-function DeltaList({ rows, emptyWord }: { rows: PageDelta[]; emptyWord: string }) {
+const COLUMN_BODY: Record<string, string> = {
+  fixed: "The earlier run raised a change here. This run did not raise one.",
+  still_open: "Both runs raised a change on this page. Nothing about it moved.",
+  new: "This run raised it. The earlier run did not reach this page, so nothing is compared.",
+  regressed:
+    "Both runs judged this page. This one raised it, and the earlier run did not.",
+}
+
+function day(iso: string): string {
+  return `${iso.slice(8, 10)} ${["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][Number(iso.slice(5, 7)) - 1] ?? ""}`
+}
+
+function DeltaList({ rows, kind }: { rows: PageDelta[]; kind: string }) {
   if (rows.length === 0) {
-    return <p className="dcol-empty">{emptyWord}</p>
+    return <p className="dcol-empty">nothing in this column</p>
   }
   return (
     <ul className="dcol-list">
@@ -19,6 +31,9 @@ function DeltaList({ rows, emptyWord }: { rows: PageDelta[]; emptyWord: string }
           <span className="dp" title={row.url}>
             {row.path}
           </span>
+          {kind === "regressed" && (
+            <span className="dchipword">regressed — this run treats the page worse than the one before</span>
+          )}
           {row.topChange && <span className="dc">{row.topChange}</span>}
         </li>
       ))}
@@ -28,108 +43,103 @@ function DeltaList({ rows, emptyWord }: { rows: PageDelta[]; emptyWord: string }
 
 export interface RunDiffProps {
   delta: RunDelta | null
-  running: boolean
 }
 
-export function RunDiff({ delta, running }: RunDiffProps) {
-  if (!delta) {
-    return (
-      <div className="dempty">
-        <b>no run yet</b>
-        <p>Nothing has been compared. Run the audit twice on one site to fill this panel.</p>
-      </div>
-    )
-  }
+export function RunDiff({ delta }: RunDiffProps) {
+  if (!delta) return null
 
   if (delta.baseline === null) {
     return (
-      <div className="dempty">
-        <b>first run on this site</b>
-        <p>
-          There is no earlier run to compare against, so nothing here moved. The next run on this site
-          is compared to this one.
-        </p>
+      <div className="ddiff">
+        <h3 className="ddiff-h">change since the first run</h3>
+        <p className="ddiff-sub">One line per page, naming what the two runs said about it.</p>
+        <div className="ddiff-none">
+          <b>nothing to compare yet</b>
+          <p>There is no earlier run for this site. Run the audit again on the same URL and this fills.</p>
+        </div>
       </div>
     )
   }
 
   const baseline = delta.baseline
-  const openNow = delta.stillOpen.length + delta.new.length
+  const since = day(baseline.generatedAt)
   const moved = delta.fixed.length + delta.new.length + delta.regressed.length
   const crawledShrank = delta.pagesCrawledNow < delta.pagesCrawledBefore
-
-  if (moved === 0) {
-    return (
-      <div className="dempty">
-        <b>nothing moved</b>
-        <p>
-          {delta.stillOpen.length} of {baseline.openPages} pages open last run are still open. The
-          same pages, the same instruction.
-        </p>
-        <p className="dsee">this run compared against the run of {baseline.generatedAt.slice(0, 10)}</p>
-      </div>
-    )
-  }
-
   const columns = [
-    { key: "fixed", rows: delta.fixed, empty: "nothing was closed" },
-    { key: "still_open", rows: delta.stillOpen, empty: "nothing stayed open" },
-    { key: "new", rows: delta.new, empty: "nothing new was opened" },
-    { key: "regressed", rows: delta.regressed, empty: "nothing regressed" },
+    { key: "regressed", rows: delta.regressed },
+    { key: "fixed", rows: delta.fixed },
+    { key: "new", rows: delta.new },
+    { key: "still_open", rows: delta.stillOpen },
   ] as const
 
   return (
     <div className="ddiff">
-      <div className="ddiff-top">
-        <span
-          className="ddiff-count"
-          title="Pages that had a decisive change last run and have none this run."
-        >
-          {delta.fixed.length} of {baseline.openPages} pages open last run are fixed
-        </span>
-        {delta.scoreDelta !== null && (
-          <span
-            className={`ddiff-score ${delta.scoreDelta < 0 ? "down" : ""}`}
-            title="Site score, both runs on the same rubric."
-          >
-            score {delta.scoreDelta > 0 ? "+" : ""}
-            {delta.scoreDelta}
-          </span>
-        )}
-        <span className="ddiff-base" title="The run this one is compared against.">
-          compared against {baseline.generatedAt.slice(0, 10)} · {baseline.openPages} open ·{" "}
-          {delta.clean} closed in both
-        </span>
-      </div>
+      <h3 className="ddiff-h">change since {since}</h3>
+      <p className="ddiff-sub">One line per page, naming what the two runs said about it.</p>
 
-      {crawledShrank && (
-        <p className="ddiff-caveat">
-          This run crawled {delta.pagesCrawledNow} of {delta.pagesCrawledBefore} pages the last one
-          did. A page missing below was not crawled this time, not fixed.
-        </p>
+      {moved === 0 ? (
+        <div className="ddiff-none">
+          <b>nothing moved between these two runs</b>
+          <p>Every page the two runs share has the same change raised on it.</p>
+          <p>This is what a re-run looks like before the edits land.</p>
+          <p>Every change in 02 came from the earlier run. Nothing was taken off the list.</p>
+        </div>
+      ) : (
+        <>
+          {crawledShrank && (
+            <p className="ddiff-caveat">
+              This run crawled {delta.pagesCrawledNow} of {delta.pagesCrawledBefore} pages the last
+              one did. A page missing below was not crawled this time, not closed.
+            </p>
+          )}
+          <div className="ddiff-grid">
+            {columns.map((column) => (
+              <section className={`dcol dcol-${column.key}`} key={column.key}>
+                <h4 className="dcol-h">
+                  {COLUMN_WORD[column.key]}
+                  <span
+                    className="dcol-n"
+                    title={`Pages in the ${COLUMN_WORD[column.key]} column.`}
+                  >
+                    {column.rows.length}
+                  </span>
+                </h4>
+                <p className="dcol-body">{COLUMN_BODY[column.key]}</p>
+                <DeltaList rows={column.rows} kind={column.key} />
+              </section>
+            ))}
+          </div>
+        </>
       )}
 
-      <div className="ddiff-grid">
-        {columns.map((column) => (
-          <section className={`dcol dcol-${column.key}`} key={column.key}>
-            <h4 className="dcol-h">
-              {COLUMN_WORD[column.key]}
-              <span
-                className="dcol-n"
-                title={`Pages the ${COLUMN_WORD[column.key]} column is reporting on.`}
-              >
-                {column.rows.length}
-              </span>
-            </h4>
-            <DeltaList rows={column.rows} emptyWord={column.empty} />
-          </section>
-        ))}
-      </div>
-
-      <p className="dnote faint">
-        {openNow} of {baseline.openPages} pages open last run are open now. A page is open when the
-        judge committed to a change on it, or a rule check cleared the decisive band.
+      <p className="ddiff-note">
+        A difference here is a difference between two judgements. It is not a measurement of the site.
+      </p>
+      <p className="ddiff-note">
+        Two runs agreeing is normal. It is not a sign the pages are finished.
       </p>
     </div>
+  )
+}
+
+/** The 02 half-head count. Never renders a breakdown without its denominator. */
+export function RunDiffCount({ delta }: { delta: RunDelta | null }) {
+  if (!delta) return <>no comparison yet</>
+  if (delta.baseline === null) return <>nothing to compare yet</>
+  const baseline = delta.baseline
+  return (
+    <>
+      <span title="Pages that moved, out of the pages the earlier run raised a change on.">
+        {delta.fixed.length + delta.new.length + delta.regressed.length} of {baseline.openPages} pages
+        moved between these two runs
+      </span>
+      <span className="dcount-sub">
+        {baseline.openPages} pages appeared in both runs, which is what can be compared
+      </span>
+      <span className="dcount-break">
+        {delta.regressed.length} regressed · {delta.fixed.length} no longer raised · {delta.new.length}{" "}
+        newly raised · {delta.stillOpen.length} still open
+      </span>
+    </>
   )
 }

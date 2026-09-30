@@ -186,6 +186,64 @@ and was reachable in both runs **is** a regression, and the two must not share a
 to cover two situations that are not the same. The reader's action differs: one is "leave it", the
 other is "read the new instruction".
 
+### The wire shape, AS SHIPPED
+
+`server/src/history.ts` is gilfoyle's and this is its real shape, not a proposal. `GET /api/history`
+returns the run list; `RunDelta` carries the buckets.
+
+```
+RunDelta {
+  baseline: null | { generatedAt, score, openPages },
+  scoreDelta: number | null,
+  fixed: PageDelta[], stillOpen: PageDelta[],
+  new: PageDelta[], regressed: PageDelta[],
+  offCrawl: PageDelta[], clean: number,
+  pagesCrawledNow: number, pagesCrawledBefore: number
+}
+```
+
+```
+PageDelta { path, url, state, openNow, openBefore, topChange }
+```
+
+`DeltaState` is `fixed | still_open | new | regressed | off_crawl`.
+
+### Two states in this file the payload cannot produce
+
+Stated plainly so nobody ships copy the panel can never show.
+
+| state | why it is blocked | ship as |
+| --- | --- | --- |
+| `changed` | `PageDelta` carries one `topChange`, and the delta tracks an `open` boolean, not instructions | `still open` |
+| `regressed` via band move | the payload has no `bandFrom`/`bandTo`; bands are never compared between runs | omit |
+
+`changed` degrades safely, because `still open` is true and the row still points at the current
+instruction. The band-move case has no safe degradation — it would be a real regression reported as
+nothing. If gilfoyle adds it, the strings are already written above and need only a bucket.
+
+### `not comparable` comes from `offCrawl`, and it is not optional
+
+`offCrawl` is the bucket for a page that was raised in the earlier run and **was not crawled this
+time**. It is the only reason `no longer raised` is safe to believe: a page that left the crawl must
+never appear as closed.
+
+**Rendering `offCrawl` is a correctness requirement, not a nicety.** Dropped, it makes a page that
+silently fell out of the crawl disappear, and it can do so while the nothing-moved empty state reads
+as healthy. That is the one path where this feature states something false.
+
+The caveat line that covers a shrunken crawl is not a substitute. It fires on `pagesCrawledNow <
+pagesCrawledBefore`, so a page can leave the crawl while the total holds steady or grows, and the
+caveat stays silent.
+
+Per-column, the same requirement: when `offCrawl.length > 0`, the nothing-moved state may not render.
+
+`comparable` is the field that cannot be reconstructed downstream. It is what separates
+`regressed` from `newly_raised`, and those two have opposite reader actions. If the payload ships
+`state` without it, the distinction is gone and the UI will have to guess.
+
+`startedAt` must be the run's own wall clock, because it is what the `compare to` control and the
+`change since 14 Sep` header both render. It is countable, so it is allowed on screen.
+
 ### Every chip must survive being wrong
 
 A band moves when a threshold is retuned. A judgement moves when the model version changes. A page
@@ -279,22 +337,40 @@ Pages one run did not reach are marked not comparable, never as closed.
 
 ### Count chip
 
-In the `02` half head, next to the existing `{n} decided · {k} held` chip. Regressed leads, because
-it is the row that needs a decision today.
+Two lines in the `02` half head. **Every count reads `X of Y` plus a line naming what Y is** — a bare
+breakdown gives the reader no denominator and no idea what it is a share of.
+
+```
+{k} of {comparable} pages moved between these two runs
+```
+
+```
+{comparable} pages appeared in both runs, which is what can be compared
+```
+
+Then the breakdown, regressed leading, because that is the row needing a decision today:
 
 ```
 {k} regressed · {n} no longer raised · {j} newly raised · {i} still open
 ```
 
-With no comparison active the chip is unchanged from today. It never renders all zeros.
+With no comparison active the chip is unchanged from today. It never renders all zeros, and it never
+renders a bare breakdown without the `{comparable}` denominator above it.
 
 ---
 
 ## 03 WHEN NOTHING MOVED
 
-The common case, and the one that is easy to write badly. "Nothing changed" written as a triumph
-is the failure: two runs agreeing is the **weakest** evidence the product produces, and the copy
-has to say so in the same breath.
+The common case. It must read as a **normal, healthy result**: a re-run over pages nobody has edited
+yet is not a problem, and nothing about it is a failure.
+
+The temptation is to over-read it. `all clear`, `your site is in good shape` and `no action needed`
+are all false here — two runs agreeing is compatible with a site that needs the same twenty edits.
+The honest way to sound healthy is to say what is true and what it means for today, not to
+apologise or to sell.
+
+So: state the cause, say the list is unchanged, and point at 02. No warning, no reassurance, no
+apology.
 
 ### Both runs ran and agreed
 
@@ -304,19 +380,26 @@ Every page the two runs share has the same change raised on it.
 ```
 
 ```
-Two runs agreed. That is not the same as a page being right.
+This is what a re-run looks like before the edits land.
 ```
 
 ```
-Make one edit, then re-run. Two runs agreeing is the weakest evidence here.
+Every change in 02 came from the earlier run. Nothing was taken off the list.
 ```
 
-Third line is the call to action. There is always one, because the reader's only move is to change
-something and re-run.
+Second line names the cause, which is what the voice rules require of an empty panel. Third is the
+reader's next move and it is a place, not an instruction. It is also honest under either cause —
+edited or not edited — because nothing came off the list either way.
 
-Do not write `your site is in good shape`, `no action needed`, or `all clear`. A bounded crawl
-reaching the same pages and a model answering the same way twice is compatible with a site that
-needs the same twenty edits. This product cannot tell those apart, and neither can the reader.
+**A standing line, once under the strip, not per row.** This is where the honest bound lives now,
+instead of inside the empty state:
+
+```
+Two runs agreeing is normal. It is not a sign the pages are finished.
+```
+
+Put it on the strip rather than in the empty state so it is present when the panel is full too,
+which is when a reader is most likely to over-read a row of `still open`.
 
 ### The page sets differ
 
@@ -374,13 +457,17 @@ Two lines. The first is what is in the file, the second is what is deliberately 
 
 ```
 One row per page: path, the change raised, its band, its probability, and how it moved.
-Every column is measured or judged here. No search volume, no positions, no forecasts.
+Every number is quoted from the tool that returned it. None was estimated here.
 ```
+
+Second line is the provenance line, in the same register as the one shipped in `04 rivals`. It is
+also literally true here: `probability` comes from Jev, `band` from `thresholds.ts` in code, words
+and inbound links from the crawler.
 
 ### The deliberate omissions, enumerated
 
-The second line above is a summary. A file is handed to someone else, so the list has to be
-complete and it has to be in the file's own sheet.
+A file is handed to someone else, so the omissions have to be complete and they have to be in the
+file's own sheet, not only in the dashboard.
 
 ```
 deliberately not in this file

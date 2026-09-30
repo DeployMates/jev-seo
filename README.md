@@ -188,6 +188,26 @@ actually ran, and whether its probabilities are calibrated.
 
 ---
 
+### When the judge says "rate limit exceeded"
+
+The keyless Zen tier is metered **per egress IP**, so a spent address is the
+usual cause of a 429 that retrying cannot clear. Point the provider at a proxy
+pool:
+
+```bash
+jev-seo proxy                              # show the pool, credentials redacted
+jev-seo start --proxy-pool ./proxies.txt   # use this pool
+jev-seo start --no-proxy                   # bypass it, go direct
+```
+
+One `IP:PORT:USER:PASS` per line, `#` for comments, optional `|key=value`
+metadata after a pipe. The default pool is
+`~/.config/opencode/plugins/proxies.txt`; `JEV_PROXY_POOL` overrides it. A proxy
+that fails — 402, dead host, tunnel that never opens — is parked for 15 minutes
+and the request retried on the next one. Credentials are never printed.
+
+This is separate from `JEV_PROXIES_FILE`, which belongs to the crawl path.
+
 ## How an audit runs
 
 1. **Crawl** — breadth-first, bounded by page count, depth and a wall-clock budget. Reads

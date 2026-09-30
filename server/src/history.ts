@@ -1,32 +1,30 @@
 /**
- * Run history, and the delta between two runs of the same root.
+ * Run history, and what changed between two runs of the same root.
  *
  * A single audit is a snapshot, and a snapshot cannot answer the only question a
- * paying customer asks a second time: *did anything I did last week work?* So
- * the last N runs are kept per root and compared.
+ * returning customer asks: *did anything I did last week land?* So the last N
+ * runs are kept per root and compared page by page.
  *
- * Three things this file refuses to do, because each of them would make the
- * delta say something the runs did not show:
+ * The contract this file implements, and the reason it is per page rather than a
+ * score difference:
  *
- * 1. **It does not compare scores across differently-sized crawls.** A site that
- *    grew from 12 to 40 pages scores lower on raw defect count while getting
- *    strictly better, and a delta that reported that as a regression would be
- *    arithmetic dressed as a finding. The delta is per page, and the counts are
- *    reported next to it.
- * 2. **It does not call a newly-crawled page a regression.** A page that was not
- *    in the previous run has no prior state, so it is `new` — a crawl-depth
- *    change, not a page that got worse.
- * 3. **It does not store page text.** Snapshots carry the counted facts and the
- *    decision, never the body. Ten runs of a 40-page site would otherwise put a
- *    full copy of the customer's site on disk, and history is a convenience
- *    feature that has no business keeping that.
- *
- * `open` is the single thing the delta tracks, and it is deliberately a disjunction
- * rather than a score: a page counts as open when the run produced a decisive
- * top change for it (`decisions.ts` emitted a `DecisionRow`) or at least one
- * `act`-band finding. Both are the product's own definition of "there is work
- * here", so the delta is comparing like with like rather than inventing a
- * new one. A grey-zone row is not open — that is what the grey zone means.
+ * - **`reachable` is the only basis for a comparison.** A page is reachable in a
+ *   run when the crawler fetched it AND it was judged. `decisions[]` is NOT
+ *   reachability evidence — a page can be reachable and raise nothing, which is
+ *   what `notDecided[]` records. So a page that is merely absent from
+ *   `decisions[]` is not evidence it was never looked at, and this file never
+ *   treats it as such.
+ * - **A page we could not see is never a good result.** Anything the two runs
+ *   are not both able to speak about is `not_comparable`, never a closed state.
+ *   This is the rule that stops a deeper or shallower crawl from manufacturing
+ *   progress, in either direction.
+ * - **A score delta is reported but never acted on.** Raw defect count falls as
+ *   a site gets bigger, so a score comparison across two differently-sized
+ *   crawls is arithmetic, not a finding. It is carried for context only.
+ * - **No page text is stored.** Snapshots hold the counted facts and the
+ *   decision. Ten runs of a 40-page site would otherwise leave a full copy of
+ *   the customer's site on disk, and history is a convenience that has no
+ *   business keeping that.
  */
 import { readFileSync, writeFileSync } from "node:fs"
 import { historyPath } from "./paths.js"
@@ -34,16 +32,46 @@ import { historyPath } from "./paths.js"
 /** Runs kept per root. Bounded because nothing here is a log archive. */
 export const HISTORY_LIMIT = 10
 
-export type DeltaState = "fixed" | "still_open" | "new" | "regressed" | "off_crawl" | "clean"
+/**
+ * The panel words, deliberately not the internal band names. `act` / `review` /
+ * `escalate` are threshold vocabulary; these are what a customer reads, and the
+ * ordering below is the whole point of the mapping.
+ */
+export type PageBandWord = "decisive" | "to verify" | "needs a human"
+
+/** Higher is worse. A rise in this number is a movement against the user. */
+const BAND_RANK: Record<PageBandWord, number> = {
+  decisive: 0,
+  "to verify": 1,
+  "needs a human": 2,
+}
+
+/**
+ * The six outcomes. Five are columns; `not_comparable` is a column of its own
+ * because a delta nobody can trust needs to be visible, and `clean` is the
+ * absence of any of them and is counted rather than listed.
+ */
+export type DeltaState =
+  | "still_open"
+  | "changed"
+  | "not_longer_raised"
+  | "regressed"
+  | "newly_raised"
+  | "not_comparable"
+  | "clean"
 
 export interface HistoryPage {
   path: string
   url: string
-  /** Decisive top change, or an `act`-band finding. The one thing diffed. */
-  open: boolean
-  /** The instruction, when there was a decisive one. For display only. */
+  /** Crawled AND judged this run. The only basis for a comparison. */
+  reachable: boolean
+  /** The run produced a decisive top change, or an act-band finding. */
+  raised: boolean
+  /** `TopChange.key`, so "the same change" is decidable and not a string match. */
+  topChangeKey: string | null
+  /** The instruction, for display. Never compared. */
   topChange: string | null
-  band: string | null
+  band: PageBandWord | null
   findings: number
   ruleFindings: number
   words: number
@@ -77,29 +105,35 @@ export interface PageDelta {
   path: string
   url: string
   state: DeltaState
-  /** Open in the run being reported. */
-  openNow: boolean
-  /** Open in the previous run. `false` when the page was not crawled then. */
-  openBefore: boolean
+  /** Reachable in both runs. False wherever the state is `not_comparable`. */
+  comparable: boolean
+  raisedNow: boolean
+  raisedBefore: boolean
+  topChangeKey: string | null
   topChange: string | null
+  bandNow: PageBandWord | null
+  bandBefore: PageBandWord | null
 }
 
 export interface RunDelta {
-  /** There was no earlier run for this root, so nothing could be compared. */
-  baseline: null | { generatedAt: string; score: number; openPages: number }
-  scoreDelta: number | null
-  fixed: PageDelta[]
-  stillOpen: PageDelta[]
-  new: PageDelta[]
-  regressed: PageDelta[]
   /**
-   * Carried work on a page this run did not crawl: it may be gone, or just
-   * deeper than `maxPages`. Deliberately not `fixed` — the user fixed nothing,
-   * and a delta that reported it as a win would be the most flattering lie
-   * available here. The crawler reports unreachable pages separately.
+   * `null` is the first run for this root, not a degenerate case. It is
+   * deliberately not a diff against itself, which would report every raised page
+   * as `newly_raised` and imply progress the site has not made.
    */
-  offCrawl: PageDelta[]
+  baseline: null | { generatedAt: string; score: number; openPages: number }
+  /** Context only. Never a finding — see the file header. */
+  scoreDelta: number | null
+  stillOpen: PageDelta[]
+  changed: PageDelta[]
+  notLongerRaised: PageDelta[]
+  regressed: PageDelta[]
+  newlyRaised: PageDelta[]
+  notComparable: PageDelta[]
+  /** Reachable in both, raised in neither. Counted, never listed. */
   clean: number
+  /** Reachable in both, reachable in neither, raised in neither. */
+  unreachableBefore: number
   pagesCrawledNow: number
   pagesCrawledBefore: number
 }
@@ -121,23 +155,21 @@ export function loadHistory(root: string): HistoryRun[] {
 /**
  * Store a run, newest first, trimmed to `HISTORY_LIMIT`.
  *
- * The write is best-effort by design: history is a convenience, and an audit
- * that produced a complete report must not be reported as failed because a disk
- * write did not land. The caller is told whether it persisted so the report can
- * say so rather than implying a history exists when it does not.
+ * Best-effort by design: history is a convenience, and an audit that produced a
+ * complete report must not be reported as failed because a disk write missed.
+ * The caller is told whether it persisted, so the report can say so instead of
+ * implying a history exists when it does not.
  */
 export function recordRun(run: HistoryRun): { stored: boolean; runs: number; error?: string } {
   const origin = originOf(run.root)
   const existing = loadHistory(origin)
-  // A rerun in the same second must not shadow its predecessor: `generatedAt` is
-  // the only ordering key, so identical timestamps are disambiguated by keeping
-  // both rather than letting the later write win on a tie.
   const kept = [run, ...existing].slice(0, HISTORY_LIMIT)
   try {
-    writeFileSync(historyPath(origin), `${JSON.stringify({ root: origin, runs: kept }, null, 2)}\n`, {
-      encoding: "utf8",
-      mode: 0o600,
-    })
+    writeFileSync(
+      historyPath(origin),
+      `${JSON.stringify({ root: origin, runs: kept }, null, 2)}\n`,
+      { encoding: "utf8", mode: 0o600 },
+    )
     return { stored: true, runs: kept.length }
   } catch (error) {
     return { stored: false, runs: 0, error: (error as Error).message }
@@ -150,9 +182,9 @@ function readFileSafe(path: string): HistoryFile | null {
     if (!isHistoryFile(parsed)) return null
     return parsed
   } catch {
-    // A missing file is the normal first-run case, and a truncated one is a
-    // corrupt one. Both answer the same way: no history, no crash, no claim
-    // that a previous run existed.
+    // A missing file is the normal first run and a truncated one is a corrupt
+    // one. Both answer the same way: no history, no crash, and no claim that a
+    // previous run existed.
     return null
   }
 }
@@ -167,24 +199,42 @@ export function emptyDelta(): RunDelta {
   return {
     baseline: null,
     scoreDelta: null,
-    fixed: [],
     stillOpen: [],
-    new: [],
+    changed: [],
+    notLongerRaised: [],
     regressed: [],
-    offCrawl: [],
+    newlyRaised: [],
+    notComparable: [],
     clean: 0,
+    unreachableBefore: 0,
     pagesCrawledNow: 0,
     pagesCrawledBefore: 0,
   }
 }
 
 /**
- * The delta, page by page.
+ * The state machine, in the only order that cannot flatter anyone.
  *
- * A page absent from the previous run is `new`, never `regressed` — it has no
- * prior state to have got worse from, and calling it a regression would make a
- * deeper crawl look like a worse site. `clean` is counted, not listed: it is the
- * absence of a change, and a panel of clean pages is noise.
+ * The three gates come first because a comparison the two runs cannot both make
+ * has to be refused before anything is claimed about it:
+ *
+ * 1. Raised now but never reachable before -> `newly_raised`. We had no view of
+ *    it, so its appearance is new information, not a regression.
+ * 2. Raised before but not reachable now -> `not_comparable`. It may well be
+ *    fixed; we did not look, and "we did not look" is never a good result.
+ * 3. Otherwise if either run could not see it -> counted, listed nowhere. No
+ *    column claims it, because no column is asking a question about it.
+ *
+ * Then, over pages both runs could speak about:
+ *
+ * - raised now, not raised before -> `regressed`. It was reachable, it was
+ *   judged, it raised nothing, and now it does. Work appeared.
+ * - raised in both, band moved against the user -> `regressed` ahead of
+ *   `changed`, because a decision that got less certain is the more actionable
+ *   fact and must not be softened into "the change is different".
+ * - raised in both, different `topChange.key` -> `changed`.
+ * - raised in both, same key -> `still_open`.
+ * - not raised now, was raised before -> `not_longer_raised`.
  */
 export function diffRuns(current: HistoryRun, previous: HistoryRun | null): RunDelta {
   const delta = emptyDelta()
@@ -192,7 +242,7 @@ export function diffRuns(current: HistoryRun, previous: HistoryRun | null): RunD
 
   if (!previous) {
     for (const page of current.pages) {
-      if (page.open) delta.new.push(row(page, "new", true, false))
+      if (page.raised) delta.newlyRaised.push(row(page, null, "newly_raised", false))
       else delta.clean += 1
     }
     return delta
@@ -214,45 +264,89 @@ export function diffRuns(current: HistoryRun, previous: HistoryRun | null): RunD
     const prior = before.get(page.path)
 
     if (prior === undefined) {
-      if (page.open) delta.new.push(row(page, "new", true, false))
+      if (page.raised) delta.newlyRaised.push(row(page, null, "newly_raised", false))
       else delta.clean += 1
       continue
     }
-    if (page.open && prior.open) delta.stillOpen.push(row(page, "still_open", true, true))
-    else if (!page.open && prior.open) delta.fixed.push(row(page, "fixed", false, true))
-    else if (page.open) delta.regressed.push(row(page, "regressed", true, false))
-    else delta.clean += 1
-  }
 
-  // A page that carried work and is no longer crawled at all is not fixed. It
-  // is off the crawl, which the crawler reports separately, and counting it as a
-  // win would be the single most flattering lie available here.
-  for (const [path, prior] of before) {
-    if (seen.has(path)) continue
-    if (!prior.open) {
-      delta.clean += 1
+    if (page.raised && !prior.reachable) {
+      delta.newlyRaised.push(row(page, prior, "newly_raised", false))
       continue
     }
-    delta.offCrawl.push({
+    if (prior.raised && !page.reachable) {
+      delta.notComparable.push(row(page, prior, "not_comparable", false))
+      continue
+    }
+    if (!page.reachable || !prior.reachable) {
+      delta.unreachableBefore += 1
+      continue
+    }
+
+    const comparable = true
+    if (!page.raised) {
+      if (prior.raised) delta.notLongerRaised.push(row(page, prior, "not_longer_raised", comparable))
+      else delta.clean += 1
+      continue
+    }
+
+    if (!prior.raised || bandWorsened(page.band, prior.band)) {
+      delta.regressed.push(row(page, prior, "regressed", comparable))
+      continue
+    }
+    if (page.topChangeKey !== prior.topChangeKey) {
+      delta.changed.push(row(page, prior, "changed", comparable))
+      continue
+    }
+    delta.stillOpen.push(row(page, prior, "still_open", comparable))
+  }
+
+  // Carried work on a page this run did not crawl. Never `not_longer_raised`:
+  // the user closed nothing, and reporting it as closed is the most flattering
+  // lie available here.
+  for (const [path, prior] of before) {
+    if (seen.has(path)) continue
+    if (!prior.raised) {
+      delta.unreachableBefore += 1
+      continue
+    }
+    delta.notComparable.push({
       path,
       url: prior.url,
-      state: "off_crawl",
-      openNow: false,
-      openBefore: true,
+      state: "not_comparable",
+      comparable: false,
+      raisedNow: false,
+      raisedBefore: true,
+      topChangeKey: null,
       topChange: null,
+      bandNow: null,
+      bandBefore: prior.band,
     })
   }
 
   return delta
 }
 
-function row(page: HistoryPage, state: DeltaState, openNow: boolean, openBefore: boolean): PageDelta {
+function bandWorsened(now: PageBandWord | null, before: PageBandWord | null): boolean {
+  if (!now || !before) return false
+  return BAND_RANK[now] > BAND_RANK[before]
+}
+
+function row(
+  page: HistoryPage,
+  prior: HistoryPage | null,
+  state: DeltaState,
+  comparable: boolean,
+): PageDelta {
   return {
     path: page.path,
     url: page.url,
     state,
-    openNow,
-    openBefore,
+    comparable,
+    raisedNow: page.raised,
+    raisedBefore: prior?.raised ?? false,
+    topChangeKey: page.topChangeKey,
     topChange: page.topChange,
+    bandNow: page.band,
+    bandBefore: prior?.band ?? null,
   }
 }

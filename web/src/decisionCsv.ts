@@ -96,6 +96,10 @@ export function downloadDecisionsCsv(
     "# inbound counts are a floor: the crawl is bounded, so a page can show 0",
     "# because the crawl stopped, not because the page is orphaned.",
     "# p_this_change and p_runner_up are the judge's probabilities. No column predicts a position or a number of visitors.",
+    "#",
+    "# deliberately not in this file:",
+    "# no search volume - no keyword positions - no backlink counts - no promised outcome",
+    "# page text - anything a model inferred that no tool returned",
   ].join("\r\n")
 
   const blob = new Blob(["﻿", decisionsToCsv(rows), provenance], {

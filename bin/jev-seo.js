@@ -18,6 +18,7 @@
 import { spawn } from "node:child_process"
 import { existsSync, readFileSync, unlinkSync, writeFileSync, openSync } from "node:fs"
 import { createConnection } from "node:net"
+import { homedir } from "node:os"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 
@@ -31,12 +32,20 @@ const DEFAULT_PORT = 8787
 /* -------------------------------------------------------------------------- */
 
 function parseArgs(argv) {
-  const flags = { detach: false, port: null }
+  const flags = { detach: false, port: null, proxyPool: null, noProxy: false }
   const rest = []
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
     if (arg === "--detach" || arg === "-d") flags.detach = true
-    else if (arg === "--port" || arg === "-p") {
+    else if (arg === "--no-proxy" || arg === "-n") flags.noProxy = true
+    else if (arg === "--proxy-pool" || arg === "-x") {
+      const value = argv[i + 1]
+      if (!value || value.startsWith("-")) {
+        die("--proxy-pool needs a path to a proxy file")
+      }
+      flags.proxyPool = value
+      i += 1
+    } else if (arg === "--port" || arg === "-p") {
       const value = Number(argv[i + 1])
       if (Number.isInteger(value) && value > 0 && value < 65536) {
         flags.port = value
@@ -110,6 +119,89 @@ function alive(pid) {
 }
 
 /* -------------------------------------------------------------------------- */
+/* the Zen proxy pool                                                         */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The Zen keyless tier is metered per egress IP, so a spent IP is the usual
+ * cause of a 429 that retrying cannot clear; `zenProxy.ts` rotates the address.
+ * Its variable is `JEV_PROXY_POOL`, deliberately *not* `JEV_PROXIES_FILE`,
+ * which belongs to the crawl path. Credentials are never printed.
+ */
+const ZEN_POOL_DEFAULT = resolve(homedir(), ".config/opencode/plugins/proxies.txt")
+
+function resolveZenPool(explicit) {
+  if (explicit) return resolve(explicit)
+  const fromEnv = process.env.JEV_PROXY_POOL?.trim()
+  if (fromEnv) return resolve(fromEnv)
+  return ZEN_POOL_DEFAULT
+}
+
+/** One `host:port:user:pass` per line. Only the host is ever shown. */
+function readZenPool(path) {
+  if (!existsSync(path)) return { path, total: 0, hosts: [], exists: false }
+  let lines
+  try {
+    lines = readFileSync(path, "utf8").split(/\r?\n/)
+  } catch (error) {
+    return { path, total: 0, hosts: [], exists: true, error: error.message }
+  }
+  const hosts = []
+  for (const raw of lines) {
+    const line = raw.trim()
+    if (!line || line.startsWith("#")) continue
+    const host = line.split("|")[0].trim().split(":")[0]
+    if (host) hosts.push(host)
+  }
+  return { path, total: hosts.length, hosts, exists: true }
+}
+
+function zenPoolEnv(flags) {
+  const env = { ...process.env }
+  if (flags.noProxy) env.JEV_NO_PROXY = "1"
+  else delete env.JEV_NO_PROXY
+
+  if (flags.proxyPool) {
+    const path = resolve(flags.proxyPool)
+    if (!existsSync(path)) {
+      die(`proxy pool not found: ${path}`)
+    }
+    env.JEV_PROXY_POOL = path
+  }
+  return env
+}
+
+async function cmdProxy(flags) {
+  const path = resolveZenPool(flags.proxyPool)
+  const pool = readZenPool(path)
+  const disabled = flags.noProxy || process.env.JEV_NO_PROXY === "1"
+
+  console.log(`pool file:  ${path}${pool.exists ? "" : "  (not found)"}`)
+  if (pool.error) {
+    console.log(`error:      ${pool.error}`)
+    process.exit(1)
+  }
+  if (!pool.exists) {
+    console.log("entries:    0")
+    console.log("")
+    console.log("The Zen keyless tier is metered per egress IP, so a spent IP is the")
+    console.log("usual cause of a 429 that retrying cannot clear. Point at a pool with:")
+    console.log("  jev-seo proxy --proxy-pool ./proxies.txt")
+    console.log("one `host:port:user:pass` per line, `#` for comments. Or bypass it:")
+    console.log("  jev-seo start --no-proxy")
+    process.exit(0)
+  }
+
+  console.log(`entries:    ${pool.total}`)
+  if (disabled) {
+    console.log("state:      DISABLED by --no-proxy — requests go direct")
+  } else {
+    console.log(`hosts:      ${pool.hosts.slice(0, 8).join(", ")}${pool.hosts.length > 8 ? `, +${pool.hosts.length - 8} more` : ""}`)
+  }
+  console.log("credentials are never printed")
+}
+
+/* -------------------------------------------------------------------------- */
 /* commands                                                                    */
 /* -------------------------------------------------------------------------- */
 
@@ -144,7 +236,9 @@ async function cmdStart(flags) {
     )
   }
 
-  const env = { ...process.env, PORT: String(port) }
+  const env = { ...zenPoolEnv(flags), PORT: String(port) }
+  if (flags.proxyPool) console.log(`[jev-seo] zen proxy pool: ${resolve(flags.proxyPool)}`)
+  if (flags.noProxy) console.log("[jev-seo] zen proxy: disabled, requests go direct")
 
   if (!flags.detach) {
     console.log(`[jev-seo] starting on http://localhost:${port} (ctrl-c to stop)`)
@@ -315,6 +409,20 @@ async function cmdDoctor(flags) {
   }
   mark("warn", `GSC service account (${keyPath})`, detail)
 
+  // The Zen pool is reported separately from the crawl pool: different
+  // variable, different purpose, and only this one clears a 429.
+  const zen = readZenPool(resolveZenPool(flags.proxyPool))
+  const zenOff = flags.noProxy || process.env.JEV_NO_PROXY === "1"
+  mark(
+    zenOff ? "warn" : zen.total > 0 ? "ok" : "warn",
+    "Zen proxy pool",
+    zenOff
+      ? "disabled — requests go direct"
+      : zen.total > 0
+        ? `${zen.total} entries, first host ${zen.hosts[0]}`
+        : `none at ${zen.path} — a spent egress IP will 429 the keyless judge`,
+  )
+
   const proxies = paths.proxiesPath()
   let proxyDetail = "not set — crawling direct"
   if (proxies) {
@@ -352,15 +460,20 @@ function usage() {
   jev-seo restart            stop, then start
   jev-seo status             pid, port and /api/health
   jev-seo doctor             preflight checks (required vs optional)
+  jev-seo proxy              show the Zen proxy pool, credentials redacted
   jev-seo version            print the version
 
   --port <n>                 override the port (default ${DEFAULT_PORT})
+  --proxy-pool <file>       proxy file for the Zen provider (host:port:user:pass)
+  --no-proxy                 bypass the pool; send Zen requests direct
 
 Environment:
   JEV_DATA_DIR               where state lives (default ~/.jev-seo)
   PORT                       default port
   JEV_ENV_FILE               explicit .env path
   JEV_WEB_DIST               explicit built-UI path
+  JEV_PROXY_POOL             default Zen proxy file for --proxy-pool
+  JEV_NO_PROXY=1             same as --no-proxy
   AGENT_PROJECT_DIR          project dir for the optional research agent`)
 }
 
@@ -384,6 +497,9 @@ switch (command) {
     break
   case "doctor":
     await cmdDoctor(flags)
+    break
+  case "proxy":
+    await cmdProxy(flags)
     break
   case "version":
     cmdVersion()

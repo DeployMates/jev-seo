@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react"
-import type { Band, DecisionRow } from "./types"
+import type { Band, DecisionRow, RunDelta } from "./types"
 import { FALSIFIER_LABEL, falsifierIsGeneric, falsifierSentence } from "./decisionCopy"
 import { downloadDecisionsCsv } from "./decisionCsv"
+import { RunDiff } from "./RunDiff"
 import "./decisions.css"
 
 const BAND_WORD: Record<Band, string> = {
@@ -157,6 +158,7 @@ export interface DoThisNowProps {
   site: string
   generatedAt: string
   model: string
+  delta: RunDelta | null
 }
 
 export function DoThisNow({
@@ -169,6 +171,7 @@ export function DoThisNow({
   site,
   generatedAt,
   model,
+  delta,
 }: DoThisNowProps) {
   const rows = useMemo(() => [...decisions].sort((a, b) => b.priority - a.priority), [decisions])
 
@@ -212,6 +215,7 @@ export function DoThisNow({
 
   return (
     <div className="dnow">
+      <RunDiff delta={delta} />
       <div className="dlist">
         {rows.map((row, i) => (
           <DecisionCard
@@ -232,15 +236,19 @@ export function DoThisNow({
         <button
           type="button"
           className="dexport"
-          title={`Download these ${rows.length} decision rows as a CSV. Counts and probabilities only, with the run's own judge and timestamp in the file.`}
+          title={`Download these ${rows.length} rows as CSV. One row per page: path, the change raised, its band, its probability, and its counted facts.`}
           onClick={() => downloadDecisionsCsv(rows, { site, generatedAt, model })}
         >
-          export {rows.length} rows as csv
+          Download these rows as CSV
         </button>
       </div>
       <p className="dnote faint">
-        The file carries each row&rsquo;s counted facts and the judge&rsquo;s own probabilities, with
-        the run named in it.
+        One row per page: path, the change raised, its band, its probability, and how it moved.
+        Every number is quoted from the tool that returned it. None was estimated here.
+      </p>
+      <p className="dnote faint">
+        deliberately not in this file — no search volume · no keyword positions · no backlink counts
+        · no promised outcome · page text
       </p>
     </div>
   )

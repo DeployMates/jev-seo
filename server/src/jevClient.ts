@@ -24,6 +24,7 @@ import {
   currentUpstream,
   dispatcherFor,
   rotateAfterQuota,
+  rotateAfterTransportFailure,
 } from "./zenProxy.js"
 import type { Dispatcher } from "undici"
 import type { Questions } from "./questions.js"
@@ -234,6 +235,19 @@ export async function systemOne(
       const retryable =
         error instanceof JevApiError ? error.retryable : true // timeouts and network errors retry
       if (isLast || !retryable) throw error
+
+      // A transport failure means this egress address is unusable, exactly as a
+      // 429 does. Park it and retry immediately on the next one rather than
+      // burning the backoff on the same dead proxy.
+      if (!(error instanceof JevApiError) && upstream) {
+        const next = rotateAfterTransportFailure(upstream)
+        if (next) {
+          upstream = next
+          lastError = undefined
+          attempt -= 1
+          continue
+        }
+      }
 
       const retryAfterMs = error instanceof JevApiError ? error.retryAfterMs : 0
       await sleep(Math.max(1000 * 2 ** (attempt - 1), retryAfterMs))

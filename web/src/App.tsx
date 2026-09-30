@@ -11,7 +11,7 @@ import { CrawlTable, type CrawlMeta } from "./CrawlTable"
 import { DoThisNow } from "./DoThisNow"
 import { PagesToBuild } from "./PagesToBuild"
 import { RivalsPanel } from "./RivalsPanel"
-import { RunDiff } from "./RunDiff"
+import { RunDiff, RunDiffCount } from "./RunDiff"
 import { OpportunityBoard } from "./OpportunityBoard"
 import { runResearch as runResearchStream } from "./api"
 import type { ServerConfig } from "./api"
@@ -1250,6 +1250,11 @@ export default function App() {
             <span className="count">
               {decisions.length} pages decided · {notDecidedCount} held back in 05
             </span>
+            {delta && (
+              <span className="count dcount">
+                <RunDiffCount delta={delta} />
+              </span>
+            )}
           </div>
           <div className="halfbody">
             <Explain>
@@ -1266,6 +1271,7 @@ export default function App() {
               site={report?.root ?? form.url}
               generatedAt={report?.generatedAt ?? new Date().toISOString()}
               model={report?.model ?? config?.model ?? ""}
+              delta={delta}
             />
           </div>
         </section>
@@ -1394,26 +1400,6 @@ export default function App() {
                 )}
               </div>
             </details>
-          </div>
-        </section>
-
-        <section className="half advice" aria-labelledby="diff-h" data-tour="run-diff">
-          <div className="halfhead">
-            <span className="idx">06</span>
-            <h2 id="diff-h">since last run</h2>
-            <span className="what">
-              What moved between this run and the one before it on the same site.
-            </span>
-            <span className="count">
-              {delta ? `${delta.fixed.length} fixed · ${delta.regressed.length} regressed` : "no comparison yet"}
-            </span>
-          </div>
-          <div className="halfbody">
-            <Explain>
-              <b>What this gives you:</b> what you closed, what came back, and what you have not
-              touched.
-            </Explain>
-            <RunDiff delta={delta} running={running && !report} />
           </div>
         </section>
 

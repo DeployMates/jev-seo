@@ -1,6 +1,6 @@
 # Plan — npm / npx Distribution
 
-Status: **implemented** · P1–P6 shipped and clean-room verified · P7 not started
+Status: **implemented** · P1–P6 shipped and clean-room verified · P7 not started · Zen proxy pool exposed in the CLI (§7)
 Scope: `/Users/vakandi/Documents/jev-seo`
 Package: **`jevseo`** (unscoped `jev-seo` was taken on 2026-09-26)
 Goal: `npx jevseo` starts the whole product — API + UI — from a clean machine with no clone, no Python, and no `npm install` run by hand.
@@ -61,10 +61,11 @@ The reasoning is kept so the next reader does not "fix" them back:
   with the existing `module: ESNext` + `moduleResolution: bundler`, and the
   emitted ESM loads natively in Node because every relative import already
   carries `.js`. No source file was changed for the build.
-- **`prepublishOnly` does not run `typecheck`.** §1.3 wanted that gate, but
-  `server/src/audit.ts` has two pre-existing type errors (see §6), so the gate
-  would be permanently red and would block every publish. The gate belongs there
-  once those are fixed.
+- **`prepublishOnly` briefly skipped `typecheck`.** §1.3 wanted that gate, but
+  `server/src/audit.ts` had two type errors, so the gate was permanently red and
+  would have blocked every publish. Those errors are now fixed and
+  `npm run typecheck` is clean, so the gate is restored:
+  `prepublishOnly` is `typecheck && build && verify` again.
 
 
 ---
@@ -319,19 +320,77 @@ A 200 with an empty body is a failure. A screenshot is a failure for anything th
 
 ---
 
-## 6. Known issues, not introduced by this work
+---
 
-- **`server/src/audit.ts` has two pre-existing type errors.** It declares
+## 7. The Zen proxy pool
+
+The keyless `jev-1.13-free` tier is metered **per egress IP**. Once an address is
+spent, no amount of retrying clears it — the only fix is a different address.
+`server/src/zenProxy.ts` therefore owns an undici `ProxyAgent` per upstream and
+quarantines an address on 429. `jevClient.ts` passes the dispatcher and steps to
+the next upstream on a quota response.
+
+**Two proxy variables, two purposes — do not merge them:**
+
+- `JEV_PROXY_POOL` — the **Zen** provider. Read by `zenProxy.ts`. Default
+  `~/.config/opencode/plugins/proxies.txt`. Format: `IP:PORT:USER:PASS`, with
+  optional `|key=value` metadata after a pipe.
+- `JEV_PROXIES_FILE` — the **crawl** path, read by `proxyRotator.ts`. That module
+  has zero importers and is deliberately not wired in (see `server/AGENTS.md`
+  anti-pattern 11). It is dead code kept for reference.
+
+### Surfacing it in the CLI
+
+`zenProxy.ts` read its pool from the environment only, which is invisible to
+someone who just ran `npx jevseo`. The CLI now exposes it:
+
+- `jev-seo proxy` — shows the resolved pool file, entry count and the first few
+  hosts. **Credentials are never printed**, here or in `doctor`.
+- `--proxy-pool <file>` (alias `-x`) — point the Zen provider at a pool file, for
+  `start` and `proxy`. Validated at launch: a missing file is a clear error, not
+  a silent fallback to the default.
+- `--no-proxy` (alias `-n`) — bypass the pool entirely and send Zen requests
+  direct. The env equivalent is `JEV_NO_PROXY=1`.
+- `doctor` gained a **Zen proxy pool** line, reported separately from the crawl
+  pool so the two are never confused.
+
+### Bug found while verifying this: dead proxies were never quarantined
+
+`rotateAfterQuota` fired **only** on a 429. A proxy that fails at the transport
+layer — a provider 402, a dead host, a tunnel that never opens — throws inside
+`fetch` and never reaches the `response.ok` branch, so it was never parked. Every
+retry went back to the same broken address. Measured on the live pool: 2 of the
+first 4 entries answered `402 Payment Required`, and a single-page audit produced
+**30 identical `fetch failed` errors** instead of stepping to a working address.
+
+`rotateAfterTransportFailure` now parks an upstream on a transport error for the
+same cooldown a 429 gets. After the fix the same audit completed: a real
+`page-done` judgement (`band: escalate`, `needsHuman: true`, confidences 0.46 /
+0.47), nine keywords judged, `summary` and `done`. A transport failure says as
+much about an address as a quota response does — it is unusable for now.
+
+### `undici` was an undeclared dependency
+
+`zenProxy.ts` imports `ProxyAgent` and `Dispatcher` from `undici`, but `undici`
+was not in `dependencies`. It resolved only because `cheerio` happens to depend
+on it and npm hoisted it — an accident that breaks the whole Zen path the moment
+cheerio drops or changes that dependency. Now declared explicitly.
+
+---
+
+## 8. Known issues, not introduced by this work
+
+- **`server/src/audit.ts` had two type errors, now fixed.** It declared
   `topChange` / `topChangeReason` / `reach` on the page judgement and
-  `decisions` / `subjects` / `notDecided` / `presearch` on the report, but never
-  populates them at its two construction sites. `tsc` still emits — `noEmitOnError`
-  is not set — so the build works and the defect is invisible unless you run
-  `npm run typecheck`. It is a half-finished refactor, not a packaging problem.
-  Until it is fixed, `prepublishOnly` deliberately skips `typecheck`.
-- **The Zen keyless tier rate-limits per egress IP.** Audits can return
-  `FreeUsageLimitError` and degrade into a clean NDJSON `error` event rather than
-  crashing — which is the designed behaviour, but it does mean a first-run audit
-  can fail on a spent IP. `ZEN_API_KEY` with a workspace lifts it.
+  `decisions` / `subjects` / `notDecided` / `presearch` on the report without
+  populating them at its two construction sites. `tsc` emitted anyway —
+  `noEmitOnError` is not set — so the defect was invisible unless you ran
+  `npm run typecheck`. `npm run typecheck` is clean as of this commit.
+- **The Zen keyless tier rate-limits per egress IP.** A spent address returns
+  `FreeUsageLimitError` and the run degrades into a clean NDJSON `error` event
+  rather than crashing. Retrying never clears it; a different egress address
+  does, which is what §7's pool is for. `ZEN_API_KEY` with a workspace removes
+  the ceiling entirely.
 - **`.gsc/service-account.json` in the working tree is a 440-byte placeholder**,
   not a real service account key (a real RSA one is ~1.7 KB). It fails PEM
   parsing, so GSC correctly reports "not connected". It is gitignored and never

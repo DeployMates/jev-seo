@@ -91,6 +91,21 @@ export function rotateAfterQuota(current: Upstream | undefined): Upstream | unde
   return available()[cursor % available().length]
 }
 
+/**
+ * Park a proxy that failed at the transport layer — 402 from a provider out of
+ * credit, dead host, tunnel that never opened.
+ *
+ * Quarantine used to be quota-only, which made a stale pool actively harmful: a
+ * dead entry was never parked, so every retry returned to the same broken
+ * upstream and the run died with N identical `fetch failed` errors instead of
+ * stepping to the next working address. A transport failure says as much about
+ * the address as a 429 does, so it earns the same cooldown. Named separately so
+ * the two reasons stay distinguishable at the call site.
+ */
+export function rotateAfterTransportFailure(current: Upstream | undefined): Upstream | undefined {
+  return rotateAfterQuota(current)
+}
+
 export function proxyStatus(): { pool: number; live: number; host: string | null } {
   if (!loaded) loadPool()
   const up = currentUpstream()
