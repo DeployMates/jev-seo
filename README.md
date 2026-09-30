@@ -20,6 +20,18 @@
 
 ---
 
+## The dashboard
+
+One port, one process. Paste a URL and the crawl fills the wall page by page while the judgements
+land — the counters, the per-item teardown and the batch patterns all tick as the run proceeds, not
+after it.
+
+![The Jev SEO dashboard: the crawl and presearch stages, the audit form, six live counters, and the per-page table the crawler fills](.assets/dashboard.png)
+
+<p align="center">
+  <sub>Real run of the shipped build &middot; <a href="https://jev.mfrank.me">jev.mfrank.me</a> for the project site</sub>
+</p>
+
 ## The rule everything is built on
 
 > **Code finds, Jev judges, the dashboard shows the probabilities.**

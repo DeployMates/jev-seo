@@ -5,6 +5,7 @@ from `README.md` with relative paths (`./.assets/...`).
 
 | File | What it is | How it was made |
 | --- | --- | --- |
+| `dashboard.png` | 2880×2000 screenshot of the shipped dashboard, tour dismissed | the packed `.tgz` installed to a temp prefix, Playwright 2× |
 | `banner.png` | 2400×800 README header | HTML/CSS → Playwright, 2× DPR, `pngquant`-compressed to 192 KB |
 | `banner-prompt.md` | the AI photo-banner prompt + composite recipe | written by hand |
 | `layers.html` | **interactive** diagram — rotates on its own, click to hold | pure-CSS rotation + a small JS override |
