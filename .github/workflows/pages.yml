@@ -1,0 +1,57 @@
+name: Deploy static site
+
+# Publishes .assets/ as the GitHub Pages site for this repository.
+#
+# WHY .assets/ IS THE ROOT: the static page reuses banner.png, layers.html and
+# layers.png as siblings, so publishing that folder gives every asset a working
+# relative path with no duplication and no build step.
+#
+# PREREQUISITE (one-time, Settings -> Pages -> Source -> GitHub Actions):
+#   This workflow cannot enable Pages itself. On a free-plan organisation,
+#   GitHub Pages is unavailable for PRIVATE repositories — the API answers
+#   "Your current plan does not support GitHub Pages for this repository."
+#   Either upgrade the org to Team, or make the repository public. Once the
+#   source is set to "GitHub Actions", this workflow runs on its own.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".assets/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two deploys race. Pages only ever serves the newest successful one.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload .assets as the site artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .assets
+          # These are authoring notes, not site content. Keep them in the repo,
+          # out of the published root.
+          !.assets/README.md
+          !.assets/banner-prompt.md
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

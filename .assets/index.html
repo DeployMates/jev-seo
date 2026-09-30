@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jev-seo — typed judgements on a live crawl</title>
+<meta name="description" content="Audits any business website for SEO and AI-search visibility. Deterministic crawl, narrow typed judgements from the Jev decision model, probabilities streamed as they land.">
+<meta name="color-scheme" content="light">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b0b0a'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%23ff5a1f'/%3E%3C/svg%3E">
+<style>
+:root{
+  --bg:#ebe9e4; --paper:#faf9f6; --ink:#0b0b0a; --hot:#ff5a1f;
+  --line:rgba(11,11,10,.13); --muted:rgba(11,11,10,.62); --faint:rgba(11,11,10,.4);
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --sans:ui-sans-serif,-apple-system,"SF Pro Text","Segoe UI",Helvetica,Arial,sans-serif;
+  --r:12px; --max:1080px;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:72px}
+body{background:var(--bg);color:var(--ink);font:16px/1.6 var(--sans);-webkit-font-smoothing:antialiased}
+img{max-width:100%;display:block}
+a{color:inherit}
+.wrap{max-width:var(--max);margin:0 auto;padding:0 24px}
+
+/* ── nav ───────────────────────────────────────── */
+nav{position:sticky;top:0;z-index:50;background:rgba(235,233,228,.82);backdrop-filter:saturate(180%) blur(14px);border-bottom:1px solid var(--line)}
+nav .wrap{display:flex;align-items:center;gap:20px;height:56px}
+.brand{font-weight:700;font-size:14.5px;letter-spacing:-.01em;display:flex;align-items:center;gap:8px;text-decoration:none}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--hot);flex:none}
+nav .links{margin-left:auto;display:flex;gap:18px;font-size:13.5px;color:var(--muted)}
+nav .links a{text-decoration:none}
+nav .links a:hover{color:var(--ink)}
+
+/* ── hero ──────────────────────────────────────── */
+header{padding:52px 0 44px}
+.hero-img{border-radius:var(--r);overflow:hidden;border:1px solid var(--line);box-shadow:0 1px 2px rgba(11,11,10,.05),0 12px 34px rgba(11,11,10,.07)}
+h1{font-size:clamp(30px,5vw,46px);line-height:1.08;letter-spacing:-.028em;font-weight:760;margin:34px 0 0}
+.lede{font-size:clamp(16px,2.1vw,19px);color:var(--muted);max-width:62ch;margin-top:14px}
+.badges{display:flex;flex-wrap:wrap;gap:7px;margin-top:22px}
+.badges img{height:20px}
+
+/* ── command bar ───────────────────────────────── */
+.cmd{display:flex;align-items:center;gap:12px;background:var(--ink);color:#f4f2ee;border-radius:10px;padding:13px 14px 13px 17px;margin-top:26px;max-width:520px}
+.cmd code{font:14px/1.4 var(--mono);flex:1;min-width:0;overflow-x:auto;white-space:nowrap;scrollbar-width:none}
+.cmd code::-webkit-scrollbar{display:none}
+.cmd .p{color:var(--hot);font-weight:700}
+.cmd button{background:rgba(255,255,255,.11);border:0;color:#f4f2ee;font:12.5px/1 var(--sans);font-weight:600;padding:7px 11px;border-radius:6px;cursor:pointer;flex:none;transition:background .15s}
+.cmd button:hover{background:rgba(255,255,255,.19)}
+.cmd button.done{background:var(--hot)}
+
+/* ── sections ──────────────────────────────────── */
+section{padding:46px 0;border-top:1px solid var(--line)}
+h2{font-size:clamp(21px,3vw,27px);letter-spacing:-.022em;font-weight:700;margin-bottom:8px}
+.sub{color:var(--muted);max-width:64ch;margin-bottom:26px;font-size:15.5px}
+h3{font-size:15px;font-weight:650;margin:26px 0 10px;letter-spacing:-.008em}
+p+p{margin-top:11px}
+code{font:.875em/1.5 var(--mono);background:rgba(11,11,10,.055);padding:1.5px 5px;border-radius:4px}
+
+/* ── rule callout ──────────────────────────────── */
+.rule{background:var(--ink);color:#f4f2ee;border-radius:var(--r);padding:30px 32px}
+.rule .k{font:11px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--hot);font-weight:700}
+.rule blockquote{font-size:clamp(19px,3vw,26px);line-height:1.32;letter-spacing:-.02em;font-weight:640;margin:13px 0 0;max-width:30ch}
+.rule p{color:rgba(244,242,238,.66);font-size:15px;margin-top:15px;max-width:60ch}
+
+/* ── cards ─────────────────────────────────────── */
+.grid{display:grid;gap:13px}
+.g2{grid-template-columns:repeat(2,1fr)}
+.g3{grid-template-columns:repeat(3,1fr)}
+.card{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:17px 18px}
+.card h4{font-size:14px;font-weight:650;margin-bottom:6px;display:flex;align-items:center;gap:8px}
+.card h4 .n{width:17px;height:17px;border-radius:50%;background:var(--ink);color:var(--paper);font:700 10.5px/17px var(--sans);text-align:center;flex:none}
+.card p{font-size:14px;color:var(--muted);line-height:1.5}
+.card code{font-size:.84em}
+
+/* ── steps ─────────────────────────────────────── */
+ol.steps{list-style:none;counter-reset:s;max-width:74ch}
+ol.steps li{counter-increment:s;position:relative;padding:0 0 20px 40px;border-left:1px solid var(--line);margin-left:11px}
+ol.steps li:last-child{border-left-color:transparent;padding-bottom:0}
+ol.steps li::before{content:counter(s);position:absolute;left:-11px;top:-2px;width:22px;height:22px;border-radius:50%;background:var(--ink);color:var(--paper);font:600 11px/22px var(--sans);text-align:center}
+ol.steps b{display:block;font-weight:640;margin-bottom:3px;font-size:15px}
+ol.steps span{font-size:14.5px;color:var(--muted)}
+
+/* ── tables ────────────────────────────────────── */
+.tw{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--paper)}
+table{border-collapse:collapse;width:100%;font-size:14px;min-width:520px}
+th,td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--line)}
+th{font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);font-weight:650}
+tr:last-child td{border-bottom:0}
+td code{white-space:nowrap}
+
+/* ── chips ─────────────────────────────────────── */
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font:12.5px/1 var(--mono);padding:6px 10px;border-radius:6px;background:var(--ink);color:var(--paper);font-weight:600}
+.chip.g{background:rgba(11,11,10,.09);color:var(--ink);font-weight:500}
+.chip.hot{background:var(--hot)}
+
+/* ── warn ──────────────────────────────────────── */
+.warn{background:rgba(255,90,31,.07);border:1px solid rgba(255,90,31,.3);border-radius:10px;padding:18px 20px}
+.warn .k{font:11px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--hot);font-weight:700}
+.warn p{font-size:14.5px;margin-top:9px;color:var(--ink)}
+.warn p+p{margin-top:8px}
+
+/* ── layers embed ──────────────────────────────── */
+.frame{border:1px solid var(--line);border-radius:var(--r);overflow:hidden;background:var(--paper)}
+.frame iframe{display:block;width:100%;height:730px;border:0}
+.frame-cap{font-size:13px;color:var(--faint);padding:11px 15px;border-top:1px solid var(--line)}
+.frame-cap a{color:var(--hot);text-decoration:none;font-weight:600}
+
+/* ── docs list ─────────────────────────────────── */
+.docs{display:grid;gap:9px}
+.doc{display:flex;gap:14px;align-items:baseline;background:var(--paper);border:1px solid var(--line);border-radius:9px;padding:14px 16px;text-decoration:none;transition:border-color .15s,transform .15s}
+.doc:hover{border-color:var(--hot);transform:translateY(-1px)}
+.doc .f{font:12px/1.4 var(--mono);color:var(--faint);flex:none;width:15ch}
+.doc .body{flex:1;min-width:0}
+.doc .t{display:block;font-size:14.5px;font-weight:620}
+.doc .d{display:block;font-size:13.5px;color:var(--muted);margin-top:2px}
+.doc .tag{margin-left:auto;font:10.5px/1 var(--mono);letter-spacing:.06em;text-transform:uppercase;padding:4px 7px;border-radius:4px;background:rgba(11,11,10,.08);color:var(--faint);flex:none}
+.doc .tag.hot{background:var(--hot);color:#fff}
+
+/* ── reveal ────────────────────────────────────── */
+.rv{opacity:0;transform:translateY(14px);transition:opacity .55s cubic-bezier(.22,1,.36,1),transform .55s cubic-bezier(.22,1,.36,1)}
+.rv.in{opacity:1;transform:none}
+
+footer{border-top:1px solid var(--line);padding:30px 0 44px;font-size:13.5px;color:var(--faint)}
+footer .wrap{display:flex;flex-wrap:wrap;gap:12px 26px;align-items:center}
+footer a{color:var(--muted)}
+
+@media(max-width:760px){
+  .g2,.g3{grid-template-columns:1fr}
+  nav .links{gap:13px;font-size:13px}
+  .doc{flex-wrap:wrap}
+  .doc .tag{margin-left:0}
+  .frame iframe{height:900px}
+  h1{margin-top:26px}
+}
+@media(prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  .rv{opacity:1;transform:none;transition:none}
+  *{animation:none!important}
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="#top"><span class="dot"></span>jev-seo</a>
+    <div class="links">
+      <a href="#layers">Layers</a>
+      <a href="#run">Run</a>
+      <a href="#how">How</a>
+      <a href="#docs">Docs</a>
+      <a href="https://www.npmjs.com/package/@vakandi/jev-seo" target="_blank" rel="noopener">npm</a>
+    </div>
+  </div>
+</nav>
+
+<header id="top">
+  <div class="wrap">
+    <div class="hero-img rv">
+      <img src="banner.png" alt="Jev SEO Dashboard — typed judgements on a live crawl" width="1200" height="400">
+    </div>
+
+    <h1 class="rv">Typed judgements on a live crawl.</h1>
+    <p class="lede rv">Audits any business website for SEO and AI-search visibility. A deterministic
+    crawl feeds narrow typed questions to the Jev decision model, and the dashboard renders the
+    probabilities as they land &mdash; not after the report.</p>
+
+    <div class="badges rv">
+      <img src="https://img.shields.io/npm/v/@vakandi/jev-seo?style=flat-square&labelColor=0b0b0a&color=ff5a1f" alt="npm version">
+      <img src="https://img.shields.io/badge/node-%3E%3D20.11-0b0b0a?style=flat-square&logo=node&logoColor=ff5a1f" alt="Node engine">
+      <img src="https://img.shields.io/badge/TypeScript-5.7-0b0b0a?style=flat-square&logo=typescript&logoColor=ff5a1f" alt="TypeScript">
+      <img src="https://img.shields.io/badge/React-18-0b0b0a?style=flat-square&logo=react&logoColor=ff5a1f" alt="React">
+      <img src="https://img.shields.io/badge/Express-4-0b0b0a?style=flat-square&logo=express&logoColor=ff5a1f" alt="Express">
+    </div>
+
+    <div class="cmd rv">
+      <code id="cmdline"><span class="p">$</span> npx @vakandi/jev-seo</code>
+      <button id="copy" type="button" aria-label="Copy install command">Copy</button>
+    </div>
+    <p class="rv" style="font-size:13.5px;color:var(--faint);margin-top:11px">
+      No account. No API key. No clone. Dashboard and API on <b>one port</b> &mdash; 8787.
+    </p>
+  </div>
+</header>
+
+<section>
+  <div class="wrap">
+    <div class="rule rv">
+      <div class="k">The rule everything is built on</div>
+      <blockquote>Code finds, Jev judges, the dashboard shows the probabilities.</blockquote>
+      <p>Jev never writes prose. It answers narrow typed questions over crawled text and returns
+      <code>choice</code>, <code>score</code> or <code>noul</code> answers with probabilities
+      attached, which the code turns into ranked findings <b>only where the answer is decisive</b>.
+      An LLM-authored finding is the defining failure mode of this category, so it is designed out
+      rather than warned about.</p>
+    </div>
+  </div>
+</section>
+
+<section id="layers">
+  <div class="wrap">
+    <h2 class="rv">The four layers</h2>
+    <p class="sub rv">Each layer promises the next something specific. Click any layer to see its
+    invariants and the traps that cost time rather than code.</p>
+    <div class="frame rv">
+      <iframe src="layers.html" title="jev-seo — the four layers" loading="lazy"></iframe>
+      <div class="frame-cap">Interactive. The same diagram as a static image:
+        <a href="layers.png" target="_blank" rel="noopener">layers.png</a>
+        &middot; full contract in <code>LAYERS.md</code></div>
+    </div>
+  </div>
+</section>
+
+<section id="run">
+  <div class="wrap">
+    <h2 class="rv">Run it</h2>
+    <p class="sub rv">The whole install is one command. It prints a URL and serves the dashboard and
+    the API on the same port.</p>
+    <div class="grid g2">
+      <div class="card rv"><h4><span class="n">1</span>Installed</h4>
+        <p><code>npx @vakandi/jev-seo</code><br>The package is scoped; the command is not.
+        <code>npm i -g @vakandi/jev-seo</code> puts a plain <code>jev-seo</code> on your PATH.</p></div>
+      <div class="card rv"><h4><span class="n">2</span>Lifecycle</h4>
+        <p><code>start --detach</code> &middot; <code>status</code> &middot; <code>stop</code> &middot;
+        <code>doctor</code><br><code>stop</code> kills by PID from a pid file, never by process name.</p></div>
+      <div class="card rv"><h4><span class="n">3</span>From a checkout</h4>
+        <p><code>npm install</code> &middot; <code>npm run dev</code><br>
+        Dev is two ports with HMR: Vite 5173 + API 8787. Production is one.</p></div>
+      <div class="card rv"><h4><span class="n">4</span>Optional only</h4>
+        <p><code>opencode</code> for deep research &middot; <code>uv</code>/Python for agent-side
+        Search Console &middot; a GCP service account to read GSC. An audit runs without all three.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="how">
+  <div class="wrap">
+    <h2 class="rv">How an audit runs</h2>
+    <p class="sub rv">Eight stages. The model is never asked anything code can count for itself.</p>
+    <ol class="steps rv">
+      <li><b>Crawl</b><span>Breadth-first, bounded by page count, depth and a wall-clock budget. Reads and honours <code>robots.txt</code>, seeds from <code>sitemap.xml</code>. Refuses private, loopback and link-local addresses so a pasted URL cannot reach an internal service.</span></li>
+      <li><b>Extract</b><span>Title, description, H1, headings, opening text, body text, word count, canonical, language, image alt coverage, link counts, noindex, structured data, viewport.</span></li>
+      <li><b>Deterministic checks</b><span>15 rule checks code can count for itself.</span></li>
+      <li><b>Page judgements</b><span>One request per page carrying every question for that page, fired concurrently behind a bounded pool. One item per request, because packing items has been shown to cost accuracy.</span></li>
+      <li><b>Keyword pass</b><span>Code mines bigram and trigram candidates from titles, headings and body. Jev judges each: is it a real query, is a buyer typing it, what intent, which cluster, and does a page already serve it.</span></li>
+      <li><b>Competitor pass</b><span>Each rival is crawled and judged on the same rubric, so the scorecards are comparable, plus a &ldquo;worth copying&rdquo; judgement and the single change that would most improve its AI citability.</span></li>
+      <li><b>Thresholds</b><span>Three bands. Decisive answers become findings; the grey zone goes to a &ldquo;needs a human&rdquo; pile and is deliberately not acted on.</span></li>
+      <li><b>Stream</b><span>Newline-delimited JSON, so counters, the wall and the teardown tick as judgements land rather than after the report.</span></li>
+    </ol>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2 class="rv">Three primitives, three bands</h2>
+    <p class="sub rv">Both live in one reviewable file rather than being generated per call, because
+    question design and threshold tuning move accuracy more than the choice of model does.</p>
+    <h3 class="rv">Primitives</h3>
+    <div class="chips rv" style="margin-bottom:9px">
+      <span class="chip">choice</span><span class="chip">score</span><span class="chip hot">noul</span>
+    </div>
+    <p class="rv" style="font-size:14.5px;color:var(--muted);margin-bottom:6px">
+      <code>choice</code> picks one of up to 255 options and returns the full distribution &middot;
+      <code>score</code> is an ordered 2&ndash;10 rubric returning the probability-weighted mean &middot;
+      <code>noul</code> returns P(yes) for one proposition, used as a gate.</p>
+    <p class="rv" style="font-size:13.5px;color:var(--faint)">
+      <code>noul</code> is a real primitive name, not a typo. Renaming it breaks the schema.</p>
+
+    <h3 class="rv">Bands</h3>
+    <div class="chips rv">
+      <span class="chip hot">act</span><span class="chip g">review</span><span class="chip g">escalate</span>
+    </div>
+    <p class="rv" style="font-size:14.5px;color:var(--muted);margin-top:9px">
+      Decisive answers become findings. The grey zone is published, not hidden &mdash; and widening
+      <code>act</code> to raise apparent coverage is the easiest way to make this product wrong.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <h2 class="rv">What it will not tell you</h2>
+    <p class="sub rv">The limits are part of the product, so they are stated rather than discovered.</p>
+    <div class="warn rv">
+      <div class="k">No search volume, honestly</div>
+      <p>Jev carries no index, no volume data and no backlink graph, so there is <b>no way</b> to
+      produce a monthly search count from this state &mdash; not approximately, not as an estimate.
+      Keyword opportunity is computed in code from what is actually observable: on-page frequency,
+      whether the term appears in headings, and how many pages carry it.</p>
+      <p><code>google-trends</code> was <b>removed rather than registered</b>, because it has no
+      official API and its &ldquo;relative interest&rdquo; index is exactly the pseudo-volume this
+      product refuses to put in front of a paying customer.</p>
+    </div>
+    <div class="tw rv" style="margin-top:16px">
+      <table>
+        <thead><tr><th>Variable</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>JEV_DATA_DIR</code></td><td>state directory, default <code>~/.jev-seo</code></td></tr>
+          <tr><td><code>PORT</code></td><td>port, default 8787 (<code>--port</code> beats it)</td></tr>
+          <tr><td><code>JEV_ENV_FILE</code></td><td>explicit <code>.env</code> path</td></tr>
+          <tr><td><code>JEV_WEB_DIST</code></td><td>explicit built-UI path</td></tr>
+          <tr><td><code>JEV_MODEL</code></td><td>judge model, default <code>jev-1.13-free</code></td></tr>
+          <tr><td><code>ZEN_API_KEY</code></td><td>only for the rate-limited <code>jev-1.13</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="rv" style="font-size:13.5px;color:var(--faint);margin-top:12px">
+      All mutable state goes in <code>~/.jev-seo</code>. The install directory is never written to
+      &mdash; under <code>npx</code> it is a cache npm garbage-collects.</p>
+  </div>
+</section>
+
+<section id="docs">
+  <div class="wrap">
+    <h2 class="rv">Documentation</h2>
+    <p class="sub rv">Six design contracts, plus the knowledge base an agent reads before touching
+    this repo.</p>
+    <div class="docs rv">
+      <a class="doc" href="https://github.com/DeployMates/jev-seo/blob/main/docs/LAYERS.md"><span class="f">docs/LAYERS.md</span><span class="body"><span class="t">The four-layer contract</span><span class="d">What each layer may assume about the one below it, and the traps.</span></span></a>
+      <a class="doc" href="https://github.com/DeployMates/jev-seo/blob/main/docs/UI-CONTRACT.md"><span class="f">docs/UI-CONTRACT.md</span><span class="body"><span class="t">Decision-layer UI contract</span><span class="d">Backend/frontend split for the decision panel.</span></span></a>
+      <a class="doc" href="https://github.com/DeployMates/jev-seo/blob/main/docs/UX-VALUE.md"><span class="f">docs/UX-VALUE.md</span><span class="body"><span class="t">Shippable microcopy</span><span class="d">Voice rules and banned words.</span></span></a>
+      <a class="doc" href="https://github.com/DeployMates/jev-seo/blob/main/docs/RISK-REVIEW.md"><span class="f">docs/RISK-REVIEW.md</span><span class="body"><span class="t">Correctness audit</span><span class="d">Six unfixed cases where the panel can state a falsehood while every invariant passes.</span></span><span class="tag hot">read first</span></a>
+      <a class="doc" href="https://github.com/DeployMates/jev-seo/blob/main/docs/PLAN-npm-distribution.md"><span class="f">docs/PLAN-npm-…</span><span class="body"><span class="t">Single-port npx distribution</span><span class="d">P1&ndash;P6 shipped, P7 not started.</span></span><span class="tag">in progress</span></a>
+      <a class="doc" href="https://github.com/DeployMates/jev-seo/blob/main/docs/PLAN-agent-research-and-gsc-onboarding.md"><span class="f">docs/PLAN-agent-…</span><span class="body"><span class="t">Agent research + GSC onboarding</span><span class="d">Plan only.</span></span><span class="tag">not started</span></a>
+      <a class="doc" href="https://github.com/DeployMates/jev-seo/blob/main/AGENTS.md"><span class="f">AGENTS.md</span><span class="body"><span class="t">Project knowledge base</span><span class="d">Code map, conventions, and the prohibitions that are not stylistic.</span></span><span class="tag">agents</span></a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>jev-seo &mdash; a DeployMates project.</span>
+    <span>npm package published under <code>@vakandi</code>.</span>
+    <a href="https://github.com/DeployMates/jev-seo">Source</a>
+    <a href="https://www.npmjs.com/package/@vakandi/jev-seo">npm</a>
+  </div>
+</footer>
+
+<script>
+// copy-to-clipboard for the install command
+document.getElementById("copy").addEventListener("click", async (e) => {
+  const b = e.currentTarget;
+  try {
+    await navigator.clipboard.writeText("npx @vakandi/jev-seo");
+    b.textContent = "Copied"; b.classList.add("done");
+  } catch { b.textContent = "npx @vakandi/jev-seo"; }
+  setTimeout(() => { b.textContent = "Copy"; b.classList.remove("done"); }, 1600);
+});
+
+// scroll reveal, respecting reduced-motion
+const rm = matchMedia("(prefers-reduced-motion: reduce)").matches;
+if (rm || !("IntersectionObserver" in window)) {
+  document.querySelectorAll(".rv").forEach(el => el.classList.add("in"));
+} else {
+  const io = new IntersectionObserver((es) => {
+    es.forEach((en, i) => {
+      if (!en.isIntersecting) return;
+      setTimeout(() => en.target.classList.add("in"), Math.min(i * 55, 260));
+      io.unobserve(en.target);
+    });
+  }, { rootMargin: "0px 0px -8% 0px", threshold: 0.06 });
+  document.querySelectorAll(".rv").forEach(el => io.observe(el));
+}
+</script>
+</body>
+</html>
