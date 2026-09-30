@@ -1,6 +1,6 @@
 {
   "name": "jevseo",
-  "version": "1.0.0",
+  "version": "1.0.3",
   "type": "module",
   "description": "Audit any business website for SEO and AI-search visibility. Typed judgements on a live crawl, streamed as they land.",
   "license": "UNLICENSED",
