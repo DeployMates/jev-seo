@@ -717,6 +717,11 @@
 .capx-agentmodel { display: inline-flex; align-items: center; gap: 5px; }
 .capx-agentmodel > :first-child { color: var(--dim); }
 
+/* The foot scrolls, so a panel anchored to the trigger was clipped by it — and
+   overflow-x computes to auto alongside overflow-y, cutting every name's left. */
+.capx-agentmodel:has(.modelpick-panel) { width: 100%; align-items: flex-start; }
+.modelpick:has(.modelpick-panel) { display: block; width: 100%; }
+
 .modelpick { position: relative; display: inline-block; }
 .modelpick-trigger {
   display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
@@ -728,9 +733,9 @@
 .modelpick-now { max-width: 190px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .modelpick-panel {
-  position: absolute; bottom: calc(100% + 6px); right: 0; z-index: 60; width: 300px;
+  position: static; width: 100%; margin-top: 6px;
   padding: 6px; border-radius: var(--radius); border: 1px solid var(--line);
-  background: var(--paper); box-shadow: 0 10px 28px rgb(11 11 10 / 16%);
+  background: var(--bg);
 }
 .modelpick-search {
   width: 100%; box-sizing: border-box; margin-bottom: 5px; padding: 6px 8px;
